@@ -1,4 +1,4 @@
-"""Tests for the MCP voice summary server.
+﻿"""Tests for the MCP voice summary server.
 
 Run with:  .venv\\Scripts\\python.exe -m unittest discover -s tests
 
@@ -31,7 +31,7 @@ class TestInputHandling(unittest.TestCase):
 
     def test_control_characters_removed(self):
         server.speak_summary("hola\x00\x07 mundo")
-        spoken = server._queue.get_nowait()
+        spoken = server._queue.get_nowait()[0]
         self.assertNotIn("\x00", spoken)
         self.assertIn("hola", spoken)
 
@@ -43,13 +43,13 @@ class TestInputHandling(unittest.TestCase):
 
     def test_summary_is_trimmed(self):
         server.speak_summary("uno   dos\n\ntres ")
-        self.assertEqual(server._queue.get_nowait(), "uno dos tres")
+        self.assertEqual(server._queue.get_nowait()[0], "uno dos tres")
 
     def test_truncation_is_announced(self):
         with mock.patch.object(server, "MAX_SUMMARY_WORDS", "3"):
             result = server.speak_summary("uno dos tres cuatro cinco")
         self.assertIn("truncated", result)
-        self.assertEqual(server._queue.get_nowait(), "uno dos tres")
+        self.assertEqual(server._queue.get_nowait()[0], "uno dos tres")
 
     def test_mute_is_reported(self):
         with mock.patch.object(server, "VOICE_MUTE", True):
@@ -79,7 +79,7 @@ class TestVoiceNameValidation(unittest.TestCase):
                 return_value={"es-ES-A": {"Locale": "es-ES", "Gender": "Female"}},
             ):
                 server.speak_summary("hola")
-        self.assertEqual(server._queue.get_nowait(), "hola")
+        self.assertEqual(server._queue.get_nowait()[0], "hola")
 
     def test_no_catalog_means_no_validation(self):
         with mock.patch.object(server, "VOICE_NAME", "whatever"):
@@ -194,6 +194,130 @@ class TestPrivacy(unittest.TestCase):
         self.assertIn("sha256", joined)
 
 
+class TestRedaction(unittest.TestCase):
+    def test_redacts_common_token_shapes(self):
+        cases = {
+            "api_key=ABC123XYZ456TOKEN": "ABC123XYZ456TOKEN",
+            "password: hunter2hunter2": "hunter2hunter2",
+            "ghp_abcdefghijklmnopqrstuvwxyz0123": "abcdefghijklmnopqrstuvwxyz",
+            "AKIAIOSFODNN7EXAMPLE": "AKIAIOSFODNN7EXAMPLE",
+            "Bearer abcdefghijklmnopqrstuvwxyz": "abcdefghijklmnopqrstuvwxyz",
+            "sk-abcdefghijklmnopqrstuvwxyz12": "abcdefghijklmnop",
+            "xoxb-123456789012-abcdefghij": "abcdefghij",
+            "juan.perez@ejemplo.com": "ejemplo.com",
+        }
+        for text, secret in cases.items():
+            cleaned = server._redact(text)
+            self.assertNotIn(secret, cleaned, f"not redacted: {text}")
+            self.assertIn("[redacted", cleaned)
+
+    def test_redacts_private_key_block(self):
+        key = (
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\nIBAAKC\n"
+            "-----END RSA PRIVATE KEY-----"
+        )
+        self.assertNotIn("MIIEow", server._redact(f"deploy con {key}"))
+
+    def test_redaction_can_be_disabled(self):
+        with mock.patch.object(server, "REDACT", False):
+            self.assertEqual(server._redact("api_key=ABC123XYZ"), "api_key=ABC123XYZ")
+
+    def test_ordinary_text_is_untouched(self):
+        text = "He actualizado el modulo de autenticacion y sus tres pruebas"
+        self.assertEqual(server._redact(text), text)
+
+    def test_markers_do_not_get_remangled(self):
+        """A later pattern must not match what an earlier one replaced."""
+        out = server._redact("api_key=sk-abcdefghijklmnopqrstuvwxyz12")
+        self.assertIn("[redacted", out)
+        self.assertNotIn("[redacted] token]", out)
+
+    def test_secret_never_reaches_the_queue(self):
+        with mock.patch.object(server, "_queue", queue.Queue()):
+            server.speak_summary("despliegue hecho con api_key=SUPERSECRET1234")
+            self.assertNotIn("SUPERSECRET1234", server._queue.get_nowait()[0])
+
+
+class TestAdmissionControl(unittest.TestCase):
+    def setUp(self):
+        self.q = mock.patch.object(server, "_queue", queue.Queue()).start()
+        server._notif_times.clear()
+        server._last_text = ""
+
+    def test_queue_limit(self):
+        with mock.patch.object(server, "MAX_QUEUE_SIZE", "1"):
+            self.assertEqual(server.speak_summary("primera"), "Played.")
+            self.assertIn("already queued", server.speak_summary("segunda"))
+
+    def test_rate_limit(self):
+        with mock.patch.object(server, "VOICE_RATE_LIMIT", "2"):
+            server.speak_summary("una")
+            server.speak_summary("dos")
+            self.assertIn("rate limit", server.speak_summary("tres"))
+
+    def test_identical_consecutive_summaries_are_skipped(self):
+        self.assertEqual(server.speak_summary("igual"), "Played.")
+        self.assertIn("identical", server.speak_summary("igual"))
+        # A different text is fine again.
+        self.assertEqual(server.speak_summary("distinta"), "Played.")
+
+    def test_mute_is_reported(self):
+        with mock.patch.object(server, "VOICE_MUTE", True):
+            self.assertEqual(server.speak_summary("hola"), "Muted.")
+
+    def test_queue_entries_carry_a_timestamp(self):
+        server.speak_summary("hola")
+        text, enqueued_at = server._queue.get_nowait()
+        self.assertEqual(text, "hola")
+        self.assertGreater(enqueued_at, 0)
+
+
+class TestStdoutPurity(unittest.TestCase):
+    """stdout carries the MCP JSON-RPC stream, so nothing may write to it."""
+
+    def test_noisy_synthesizer_cannot_reach_stdout(self):
+        import subprocess
+        import tempfile
+
+        noisy = os.path.join(tempfile.gettempdir(), "_noisy_pyttsx3_probe.py")
+        # A stand-in synthesizer that prints to stdout when imported, which is
+        # exactly what comtypes did before the redirect was added.
+        with open(noisy, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import sys, types\n"
+                "import server_stub as s\n"
+                "mod = types.ModuleType('pyttsx3')\n"
+                "class E:\n"
+                "    def getProperty(self, k): return [] if k == 'voices' else None\n"
+                "    def setProperty(self, *a): pass\n"
+                "    def say(self, t): pass\n"
+                "    def runAndWait(self): pass\n"
+                "    def isBusy(self): return False\n"
+                "def init():\n"
+                "    print('NOISE-ON-STDOUT')\n"
+                "    return E()\n"
+                "mod.init = init\n"
+                "sys.modules['pyttsx3'] = mod\n"
+                "s.server._sapi5_engine = None\n"
+                "s.server._init_sapi5()\n"
+            )
+        stub = os.path.join(tempfile.gettempdir(), "server_stub.py")
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(stub, "w", encoding="utf-8") as handle:
+            handle.write(
+                "import os, sys\n"
+                f"sys.path.insert(0, {root!r})\n"
+                "os.environ['VOICE_ENGINE'] = 'sapi5'\n"
+                "import server\n"
+            )
+
+        proc = subprocess.run(
+            [sys.executable, noisy], capture_output=True, text=True, timeout=60
+        )
+        self.assertNotIn("NOISE-ON-STDOUT", proc.stdout)
+        self.assertIn("NOISE-ON-STDOUT", proc.stderr)
+
+
 class TestTokenBudget(unittest.TestCase):
     def test_response_does_not_echo_the_summary(self):
         """Echoing the text back wastes context on every call."""
@@ -203,3 +327,4 @@ class TestTokenBudget(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

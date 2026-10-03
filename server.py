@@ -1,4 +1,4 @@
-"""
+﻿"""
 MCP voice summary server: reads out loud a short summary of the work the
 assistant just finished.
 
@@ -59,6 +59,23 @@ PLAYBACK_TIMEOUT = os.environ.get("PLAYBACK_TIMEOUT", "30").strip()
 # acknowledged, nothing is played. Useful in shared spaces and meetings.
 VOICE_MUTE = os.environ.get("VOICE_MUTE", "").strip().lower() in ("1", "true", "yes")
 
+# Strips credentials out of the text before it is spoken or sent to the cloud
+# engine. On by default; set to 0 only if summaries never carry anything
+# sensitive.
+REDACT = os.environ.get("VOICE_REDACT", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
+
+# A spoken notification is a poor channel for old news, so a queued summary
+# older than this is dropped instead of read out minutes after it happened.
+MAX_SUMMARY_AGE = os.environ.get("MAX_SUMMARY_AGE", "120").strip()
+
+# Notifications per minute. An agent can otherwise fill the queue with spam
+# spread over time, which the queue size limit alone does not catch.
+VOICE_RATE_LIMIT = os.environ.get("VOICE_RATE_LIMIT", "30").strip()
+
 # "" system language, "es" ISO 639-1, "pt-BR" language + region, "auto" detect
 # per summary. Overridable at runtime with set_language.
 VOICE_LANGUAGE = os.environ.get("VOICE_LANGUAGE", "").strip()
@@ -91,9 +108,16 @@ _catalog_loaded = False
 
 _current_sapi5_voice = None  # type: ignore[assignment]
 
-# Pending requests, consumed in order by the worker thread.
-_queue: queue.Queue[str | None] = queue.Queue()
+# Pending requests, consumed in order by the worker thread. Each entry is
+# (text, enqueued_at) so the worker can drop stale notifications.
+_queue: queue.Queue[tuple[str, float] | None] = queue.Queue()
 
+# Guards the queue admission check, the rate limiter and the last-text dedup,
+# which are read-modify-write sequences and would otherwise race between MCP
+# handler threads.
+_admission_lock = threading.Lock()
+_notif_times: list[float] = []
+_last_text = ""
 _lock = threading.Lock()
 _sapi5_engine = None  # type: ignore[assignment]
 
@@ -138,6 +162,81 @@ def _sanitize(text: str, engine: str = "") -> str:
     """Strips control characters and markup so the text is only ever spoken."""
     cleaned = _TAGS.sub(" ", _CONTROL_CHARS.sub(" ", text))
     return " ".join(cleaned.split())
+
+
+# A summary is spoken out loud and, on the edge engine, sent to a third party.
+# Credentials read aloud in an open office, or transmitted to a cloud TTS, are a
+# leak, so the high-signal patterns are removed before anything else happens.
+_SECRET_PATTERNS = [
+    # Private key blocks, whole and unreadable.
+    (re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY-----.*?-----END[A-Z ]*PRIVATE KEY-----", re.S), "[redacted key]", "{M}"),
+    # Vendor-prefixed tokens: OpenAI, GitHub, Slack, Google, AWS access keys.
+    (re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_\-]{16,}"), "[redacted token]", "{M}"),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "[redacted token]", "{M}"),
+    (re.compile(r"\bxox[abposr]-[A-Za-z0-9\-]{10,}"), "[redacted token]", "{M}"),
+    (re.compile(r"\bAIza[0-9A-Za-z_\-]{30,}"), "[redacted token]", "{M}"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted key]", "{M}"),
+    # Authorization headers and JWTs.
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{12,}"), "[redacted token]", "{M}"),
+    (re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{6,}"), "[redacted token]", "{M}"),
+    # key=value assignments: the key stays readable, only the value is dropped.
+    (
+        re.compile(
+            r"(?i)(\b(?:api[_-]?key|secret|passwd|password|token|access[_-]?key|"
+            r"client[_-]?secret|private[_-]?key|auth)\b\s*[=:]\s*)"
+            r"[\"']?([^\s\"',;]{6,})[\"']?"
+        ),
+        "[redacted]",
+        r"\1{M}",
+    ),
+    # Email addresses and anything else shaped like one.
+    (re.compile(r"\b[\w.+\-]+@[\w\-]+\.[\w.\-]+\b"), "[redacted email]", "{M}"),
+]
+
+
+def _admit(text: str, max_queue: int) -> str:
+    """Decides whether a summary may be queued. Returns "" when it may.
+
+    Combines three guards that each cover a different abuse: the queue size
+    stops a burst, the rate limit stops sustained spam, and the dedup stops a
+    client repeating itself.
+    """
+    global _last_text
+
+    with _admission_lock:
+        if max_queue > 0 and _queue.qsize() >= max_queue:
+            return f"Nothing played: {max_queue} summaries already queued."
+
+        limit = _timeout(VOICE_RATE_LIMIT, 30)
+        cutoff = time.monotonic() - 60.0
+        while _notif_times and _notif_times[0] < cutoff:
+            _notif_times.pop(0)
+        if limit > 0 and len(_notif_times) >= limit:
+            return f"Nothing played: rate limit of {limit} per minute reached."
+
+        if _last_text and _last_text == text:
+            return "Skipped: identical to the previous summary."
+
+        _notif_times.append(time.monotonic())
+        _last_text = text
+    return ""
+
+
+def _redact(text: str) -> str:
+    """Removes credentials and personal addresses from the text.
+
+    Replacements go through placeholders so that a later pattern cannot match
+    text an earlier one already redacted, which would otherwise mangle the
+    marker itself (for example turning "[redacted token]" into
+    "[redacted] token]").
+    """
+    if not REDACT:
+        return text
+    for index, (pattern, _, template) in enumerate(_SECRET_PATTERNS):
+        text = pattern.sub(template.replace("{M}", f"\x01{index}\x01"), text)
+    for index, (_, label, _) in enumerate(_SECRET_PATTERNS):
+        text = text.replace(f"\x01{index}\x01", label)
+    return text
 
 
 # --------------------------------------------------------------------------
@@ -680,14 +779,20 @@ def _speak_edge(text: str) -> None:
 def _voice_worker() -> None:
     """Consumes the queue and speaks each summary with the configured engine."""
     speak = _speak_edge if ENGINE == "edge" else _speak_sapi5
+    max_age = _timeout(MAX_SUMMARY_AGE, 120)
 
     while True:
-        text = _queue.get()
-        if text is None:
+        item = _queue.get()
+        if item is None:
             _queue.task_done()
             return
+
+        text, enqueued_at = item
         try:
             if VOICE_MUTE:
+                continue
+            if max_age > 0 and time.monotonic() - enqueued_at > max_age:
+                logger.info("Dropped a summary that waited too long to be spoken")
                 continue
             speak(text)
         except Exception:  # noqa: BLE001 - speech must never take the server down
@@ -722,9 +827,9 @@ def speak_summary(text: str) -> str:
     """
     Reads a summary out loud. Match its length to the work done: one short
     sentence for a small change, a fuller summary for a large task. First
-    person, no literal code.
+    person, no literal code, no credentials or personal data.
     """
-    cleaned = _sanitize(text, ENGINE)
+    cleaned = _sanitize(_redact(text))
     if not cleaned:
         return "Nothing played: empty summary."
 
@@ -733,30 +838,22 @@ def speak_summary(text: str) -> str:
         if problem:
             return f"Nothing played: {problem}"
 
-    try:
-        max_queue = int(MAX_QUEUE_SIZE)
-    except ValueError:
-        logger.warning("Invalid MAX_QUEUE_SIZE: %s", MAX_QUEUE_SIZE)
-        max_queue = 20
-
-    if max_queue > 0 and _queue.qsize() >= max_queue:
-        logger.warning("Queue is full (%d pending); rejecting", max_queue)
-        return f"Nothing played: {max_queue} summaries already queued."
+    max_queue = _timeout(MAX_QUEUE_SIZE, 20)
+    refused = _admit(cleaned, max_queue)
+    if refused:
+        return refused
 
     words = cleaned.split()
-    try:
-        cap = int(MAX_SUMMARY_WORDS)
-    except ValueError:
-        logger.warning("Invalid MAX_SUMMARY_WORDS: %s", MAX_SUMMARY_WORDS)
-        cap = 400
-
+    cap = _timeout(MAX_SUMMARY_WORDS, 400)
+    truncated = False
     if cap > 0 and len(words) > cap:
         cleaned = " ".join(words[:cap]).rstrip(" ,;:.-")
+        truncated = True
         logger.warning("Summary truncated to %d words (sent %d)", cap, len(words))
-        _queue.put(cleaned)
-        return f"Played, truncated to {cap} words. Split the work for more detail."
 
-    _queue.put(cleaned)
+    _queue.put((cleaned, time.monotonic()))
+    if truncated:
+        return f"Played, truncated to {cap} words. Split the work for more detail."
     return "Muted." if VOICE_MUTE else "Played."
 
 

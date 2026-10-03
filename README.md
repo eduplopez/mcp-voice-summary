@@ -116,6 +116,9 @@ Everything is controlled through environment variables.
 | `MAX_QUEUE_SIZE` | integer | `20` | Maximum summaries waiting to be spoken |
 | `PLAYBACK_TIMEOUT` | seconds | `30` | Gives up on playback that never returns |
 | `VOICE_MUTE` | `1`, `true`, `yes` | unset | Silent mode: still queues, plays nothing |
+| `VOICE_REDACT` | `0`, `false`, `no` | on | Set to 0 to stop stripping credentials |
+| `VOICE_RATE_LIMIT` | notifications per minute | `30` | Stops a client flooding the queue |
+| `MAX_SUMMARY_AGE` | seconds | `120` | Queued summaries older than this are dropped |
 
 `VOICE_RATE` and `VOICE_VOLUME` accept both an absolute notation (the SAPI5
 scale, where 100 is normal) and a relative one (`+10%`, `-15%`). The server
@@ -507,6 +510,23 @@ offline and nothing ever leaves the machine.
 - **Summaries are never written to the log.** On failure the log records the word
   count and a short sha256 digest, so lines can be correlated without persisting
   file names, error text or secrets.
+- **Credentials are stripped before the text is spoken or sent anywhere.** Private
+  key blocks, provider tokens (OpenAI, GitHub, Slack, Google, AWS), JWTs,
+  `key=value` secrets and email addresses are replaced with `[redacted]`. A
+  summary spoken in an open office, or sent to a cloud TTS, is a leak channel.
+  Replacements go through placeholders so one pattern cannot mangle another's
+  output. Turn it off with `VOICE_REDACT=0` only if summaries never carry
+  anything sensitive.
+- **Abuse is bounded on three axes.** The queue size stops a burst, the rate
+  limit stops sustained spam that would otherwise slip past a size check, and
+  consecutive identical summaries are skipped. All three run under one lock, so
+  concurrent handlers cannot exceed the limits.
+- **Stale notifications are dropped.** A summary that waited more than
+  `MAX_SUMMARY_AGE` is discarded instead of being read out minutes after the work
+  finished.
+- **Orphan processes are handled by the standard library.** `subprocess.run` kills
+  the child when the timeout expires, verified with a process that writes its own
+  PID.
 - **Voice names are validated against the live catalog** before anything is
   queued, so a typo in `VOICE_NAME` fails immediately with a helpful message
   instead of after a wasted network round trip.
