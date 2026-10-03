@@ -1,0 +1,14 @@
+# Dependencias del servidor MCP de resumen por voz.
+#
+# mcp >=2.0: a partir de la version 2.0, FastMCP paso a llamarse MCPServer.
+# pyttsx3: sintetizacion nativa de Windows (motor sapi5, offline).
+# edge-tts: voces neuronales de Azure (motor edge, requiere internet).
+# pywin32 y comtypes: los usa pyttsx3 por debajo en Windows.
+
+mcp>=2.0,<3
+pyttsx3>=2.90
+edge-tts>=7.0
+
+# Solo necesarios en Windows para el motor sapi5:
+pywin32>=306; sys_platform == "win32"
+comtypes>=1.2; sys_platform == "win32"
