@@ -434,14 +434,20 @@ def _elegir_segun_genero(
     return candidatos[0]
 
 
-def _voz_edge_para_idioma(idioma: str, genero: str = "") -> str:
+def _voz_edge_para_idioma(
+    idioma: str, genero: str = "", ignorar_nombre: bool = False
+) -> str:
     """Elige una voz de edge-tts para el idioma y el genero pedidos.
 
     Si se pide una variante regional explicita ("pt-PT", "en-GB") se respeta
     esa region; si solo se pide el idioma ("pt", "en") se usa la variante
     regional preferida de la tabla.
+
+    ignorar_nombre salta la anulacion de VOICE_NAME. Solo lo usan las
+    herramientas para poder mostrar al usuario que alternativas existirian si
+    quitase esa variable.
     """
-    if VOICE_NAME:
+    if VOICE_NAME and not ignorar_nombre:
         return VOICE_NAME
 
     clave = idioma.lower()
@@ -708,13 +714,19 @@ def listar_voces() -> str:
         genero = _genero_efectivo(idioma) or "sin preferencia"
         cabecera.append(f"Genero: {genero}")
         cabecera.append(f"Voz en uso: {_voz_edge_para_idioma(idioma, genero)}")
-        if VOICE_NAME:
-            cabecera.append(f"VOICE_NAME sobrescribe la eleccion automatica: {VOICE_NAME}")
         cabecera.append("")
-        cabecera.append("Opciones de genero para el idioma actual:")
+        if VOICE_NAME:
+            cabecera.append(
+                f"AVISO: VOICE_NAME esta fijado a {VOICE_NAME}, asi que anula la "
+                f"seleccion automatica de idioma y genero. Estas son las voces "
+                f"que se usarian si lo quitaras:"
+            )
+        else:
+            cabecera.append("Opciones de genero para el idioma actual:")
         for etiqueta, valor in (("femenina", "female"), ("masculina", "male")):
             cabecera.append(
-                f"- {etiqueta}: {_voz_edge_para_idioma(idioma, valor)}"
+                f"- {etiqueta}: "
+                f"{_voz_edge_para_idioma(idioma, valor, ignorar_nombre=True)}"
             )
         cabecera.append("")
         cabecera.append(
@@ -851,6 +863,14 @@ def establecer_genero(genero: str) -> str:
 
     idioma = _resolver_idioma("")
     voz = _voz_edge_para_idioma(idioma, valor)
+    if VOICE_NAME:
+        alternativa = _voz_edge_para_idioma(idioma, valor, ignorar_nombre=True)
+        return (
+            f"Genero registrado como {valor}, pero VOICE_NAME sigue fijando la voz "
+            f"a {VOICE_NAME}, asi que el cambio no se oye. Quita VOICE_NAME de la "
+            f"configuracion para poder elegir por genero; entonces se usaria "
+            f"{alternativa}."
+        )
     return f"Genero fijado a {valor}. Voz para {_nombre_idioma(idioma)}: {voz}."
 
 
