@@ -1,14 +1,22 @@
 # Dependencias del servidor MCP de resumen por voz.
 #
 # mcp >=2.0: a partir de la version 2.0, FastMCP paso a llamarse MCPServer.
-# pyttsx3: sintetizacion nativa de Windows (motor sapi5, offline).
 # edge-tts: voces neuronales de Azure (motor edge, requiere internet).
-# pywin32 y comtypes: los usa pyttsx3 por debajo en Windows.
+#
+# El motor sapi5 es opcional. Solo hace falta si quieres voz offline:
+#
+#   Windows: pip install pyttsx3 pywin32 comtypes
+#   Linux:   pip install pyttsx3  y ademas el motor del sistema:
+#            sudo apt install espeak-ng libespeak-ng1
+#   macOS:   pip install pyttsx3
+#
+# Por eso pyttsx3 no se instala por defecto: asi el motor edge funciona en
+# cualquier plataforma sin dependencias del sistema.
 
 mcp>=2.0,<3
-pyttsx3>=2.90
 edge-tts>=7.0
 
-# Solo necesarios en Windows para el motor sapi5:
-pywin32>=306; sys_platform == "win32"
-comtypes>=1.2; sys_platform == "win32"
+# Motor sapi5 opcional. Descomenta si lo vas a usar:
+# pyttsx3>=2.90
+# pywin32>=306; sys_platform == "win32"
+# comtypes>=1.2; sys_platform == "win32"

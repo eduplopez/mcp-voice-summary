@@ -18,31 +18,82 @@ control de inmediato, de modo que la locución nunca bloquea al asistente.
 
 ## Requisitos
 
-- Windows 10 u 11. El motor `sapi5` depende del sintetizador nativo de Windows
-  y el reproductor de audio usa MCI, que es específico de Windows.
 - Python 3.10 o superior.
+- Windows, Linux o macOS.
+
+Solo el motor `sapi5` necesita una dependencia del sistema (el sintetizador
+nativo). El motor `edge` no necesita nada más que Python.
 
 ## Instalacion
 
 ```sh
-git clone https://github.com/TU-USUARIO/mcp-voice-summary.git
+git clone https://github.com/eduplopez/mcp-voice-summary.git
 cd mcp-voice-summary
 
 python -m venv .venv
-.venv\Scripts\activate
+```
 
+Activa el entorno virtual:
+
+```sh
+# Windows
+.venv\Scripts\activate
+# Linux y macOS
+source .venv/bin/activate
+```
+
+Instala las dependencias:
+
+```sh
 pip install -r requirements.txt
 ```
 
 Comprueba que arranca:
 
 ```sh
-.venv\Scripts\python.exe server.py
+python server.py
 ```
 
 El servidor habla por stdio, asi que no veras nada en la consola. Eso es
 correcto: cualquier texto que imprima en stdout romperia el protocolo. Ctrl+C
 para salir.
+
+### Dependencias del sistema por motor
+
+`requirements.txt` instala solo lo necesario para el motor `edge`, que es
+multiplataforma y no depende del sistema. Si quieres usar `sapi5`, instala
+ademas `pyttsx3` y el sintetizador correspondiente:
+
+| Sistema | Sintetizador | Instalacion |
+| --- | --- | --- |
+| Windows | SAPI5 | `pip install pyttsx3 pywin32 comtypes` |
+| Linux | NSSpeech | `pip install pyttsx3` y `sudo apt install espeak-ng libespeak-ng1` |
+| macOS | NSSS | `pip install pyttsx3` |
+
+### Reproductores de audio
+
+El motor `edge` genera un MP3 que hay que reproducir. El servidor busca un
+reproductor disponible y usa el primero que encuentre:
+
+| Sistema | Reproductor | Estado |
+| --- | --- | --- |
+| Windows | MCI (integrado) | Siempre disponible |
+| macOS | `afplay` | Incluido de serie en macOS |
+| Linux | `ffplay`, `mpg123`, `cvlc` o `paplay` | Instala al menos uno |
+
+En Linux instala el reproductor que prefieras:
+
+```sh
+sudo apt install ffmpeg     # aporta ffplay
+# o
+sudo apt install mpg123
+```
+
+Si tienes otro reproductor, indícalo con `VOICE_PLAYER`:
+
+```json
+"environment": { "VOICE_PLAYER": "mi-reproductor" }
+```
 
 ## Configuracion
 
@@ -54,6 +105,7 @@ Todo se controla por variables de entorno.
 | `VOICE_NAME` | id o nombre de voz | ver abajo | Voz concreta |
 | `VOICE_RATE` | `100`, `110`, `-15%` | `100` | Velocidad |
 | `VOICE_VOLUME` | `100` | `100` | Volumen |
+| `VOICE_PLAYER` | ruta o nombre | autodetectado | Reproductor de MP3 forzado |
 
 `VOICE_RATE` y `VOICE_VOLUME` aceptan notación absoluta (escala SAPI5, donde
 100 es el valor normal) y relativa (`+10%`, `-15%`). El servidor traduce
@@ -78,8 +130,9 @@ el audio se genera en la nube.
 
 ### sapi5
 
-`pyttsx3` sobre el sintetizador nativo de Windows. **Offline y sin latencia**,
-pero las voces disponibles son de calidad básica.
+`pyttsx3` sobre el sintetizador nativo del sistema. **Offline y sin latencia**,
+pero las voces disponibles son de calidad básica. Usa SAPI5 en Windows,
+NSSpeech en Linux y NSSS en macOS.
 
 ```json
 "environment": {
@@ -87,6 +140,11 @@ pero las voces disponibles son de calidad básica.
   "VOICE_NAME": "es-es"
 }
 ```
+
+El valor por defecto de `VOICE_NAME` en este motor es `es-es`, que busca una voz
+española por fragmento de identificador. En Windows eso es Helena; en Linux y
+macOS el nombre del motor nativo puede ser distinto, así que conviene usar
+`listar_voces` para ver qué hay instalado.
 
 ## Voces
 
@@ -246,12 +304,25 @@ Detalles que no son evidentes y que conviene conocer si vas a modificarlo:
 - El hilo trabajador es *daemon*: la voz nunca impide cerrar el proceso.
 - Cualquier fallo de audio se captura y se registra en el log. El servidor MCP
   nunca se cae por no poder hablar.
+- Los imports de `pyttsx3` y `edge_tts` son perezosos, para que el servidor
+  arranque aunque falte uno de los dos motores.
+- La reproducción del MP3 es una capa aparte: MCI en Windows y un reproductor
+  externo en Linux y macOS, con lista de candidatos y `VOICE_PLAYER` como
+  Override manual.
 
 ## Problemas frecuentes
 
 **No se oye nada.** Comprueba que el volumen del sistema está activo y que la
 salida por defecto es correcta. En el motor `edge`, verifica que hay
 conexión a internet.
+
+**`No se encontro ningun reproductor de audio`.** Solo afecta a Linux y macOS
+con el motor `edge`. Instala `ffmpeg`, `mpg123` o `vlc`, o define
+`VOICE_PLAYER` con tu reproductor. En Windows no ocurre, porque se usa MCI.
+
+**En Linux el motor `sapi5` no encuentra voces.** Instala el sintetizador del
+sistema: `sudo apt install espeak-ng libespeak-ng1`. Ten en cuenta que las
+voces de espeak son muy inferiores a las de edge-tts.
 
 **La voz suena entrecortada o se pisan mensajes.** Comprueba que solo hay una
 instancia del servidor MCP corriendo.
