@@ -1,38 +1,24 @@
 """
-MCP voice summary server.
+MCP voice summary server: reads out loud a short summary of the work the
+assistant just finished.
 
-Exposes a tool that reads out loud a short summary of the work the assistant
-just finished. Supports two synthesis engines, selected through environment
-variables:
+Engines, set with VOICE_ENGINE:
+- sapi5 (default): pyttsx3 on the native system synthesizer. Offline, basic
+  voices. SAPI5 on Windows, NSSpeech on Linux, NSSS on macOS.
+- edge: edge-tts neural voices. Much better, but sends the text to Microsoft.
 
-    VOICE_ENGINE = "sapi5" (default) | "edge"
-    VOICE_NAME   = voice name or id (see list_voices)
-    VOICE_RATE   = speed, 100 is normal, or relative ("+10%", "-15%")
-    VOICE_VOLUME = volume, 100 is normal
-    VOICE_GENDER = "female" | "male"
-    VOICE_LANGUAGE = "" (system default) | "es" | "pt-BR" | "auto"
+See the README for the full configuration reference.
 
-    MAX_SUMMARY_WORDS = safety cap on words per summary (400)
-
-The summary length is not fixed by the server: the assistant decides it based
-on how much work it did. MAX_SUMMARY_WORDS only prevents accidental
-multi-minute announcements.
-
-Engines:
-- sapi5: pyttsx3 on the native system synthesizer. Offline and free.
-  Uses SAPI5 on Windows, NSSpeech on Linux, NSSS on macOS.
-- edge:  edge-tts (Azure neural voices). Much better quality, but needs an
-  internet connection on every utterance.
-
-Implementation notes:
-- mcp 2.x: FastMCP was renamed to MCPServer (mcp.server.mcpserver).
-- The engine is initialized once and used from a single worker thread.
-  pyttsx3 is not thread-safe and COM is apartment-threaded: creating the
-  engine in one thread and using it in another blocks the process forever.
-- Requests are queued so two consecutive summaries never overlap.
-- The worker thread is a daemon so it never blocks process shutdown.
-- The pyttsx3, edge_tts and langdetect imports are lazy, so the server starts
-  on any platform even if only one engine is available.
+Non-obvious constraints:
+- pyttsx3 blocks forever if the engine is created in one thread and used in
+  another (COM is apartment-threaded), so the engine is created lazily and
+  only ever used from the worker thread.
+- SAPI5's runAndWait can return before playback finishes, hence the isBusy
+  wait in _speak_sapi5.
+- stdout carries the MCP JSON-RPC stream, so imports of the synthesizer are
+  wrapped in a redirect to stderr.
+- The pyttsx3, edge_tts and langdetect imports are lazy so the server starts
+  on any platform even when one engine is unavailable.
 """
 
 from __future__ import annotations
@@ -60,60 +46,44 @@ VOICE_NAME = os.environ.get("VOICE_NAME", "").strip()
 VOICE_RATE = os.environ.get("VOICE_RATE", "100").strip()
 VOICE_VOLUME = os.environ.get("VOICE_VOLUME", "100").strip()
 
-# User-forced MP3 player. Empty means auto-detect.
+# Empty means auto-detect.
 VOICE_PLAYER = os.environ.get("VOICE_PLAYER", "").strip()
 
-# Voice language. Values:
-#   ""        detect from the system language (recommended)
-#   "es"      force a language by ISO 639-1 code
-#   "pt-BR"   force a language and a specific regional variant
-#   "auto"    detect the language from the text of each summary
-# Either one can be overridden at runtime through the set_language tool.
+# "" system language, "es" ISO 639-1, "pt-BR" language + region, "auto" detect
+# per summary. Overridable at runtime with set_language.
 VOICE_LANGUAGE = os.environ.get("VOICE_LANGUAGE", "").strip()
 
-# Voice gender. Values: "" (whatever the language maps to), "female" or "male".
-# Also accepts "f"/"m". Only applies to the edge engine: SAPI5 does not expose
-# the gender of its voices.
+# "" follows the language, else "female"/"male" (or "f"/"m"). Edge only: SAPI5
+# does not expose the gender of its voices.
 VOICE_GENDER = os.environ.get("VOICE_GENDER", "").strip().lower()
 
-# Safety cap on words per summary. This is not a length recommendation: the
-# assistant decides the length based on how much work it did. The cap only
-# prevents accidental multi-minute announcements from an oversized `text`.
-# Defaults to 400 words, roughly 2-3 minutes.
+# Not a length recommendation: the assistant decides that. This only stops an
+# oversized `text` from becoming a multi-minute announcement.
 MAX_SUMMARY_WORDS = os.environ.get("MAX_SUMMARY_WORDS", "400").strip()
 
-# Maximum number of summaries waiting to be spoken. The queue is otherwise
-# unbounded, so a client looping over speak_summary faster than playback could
-# grow it without limit and exhaust memory. Requests beyond the cap are
-# rejected instead of dropped, so the caller always knows.
+# Without a cap, a client calling faster than playback grows this without limit
+# and exhausts memory. Excess requests are rejected, not silently dropped.
 MAX_QUEUE_SIZE = os.environ.get("MAX_QUEUE_SIZE", "20").strip()
 
-# Language used when no other can be determined. English has the widest voice
-# coverage across both engines.
+# Widest voice coverage across both engines.
 DEFAULT_LANGUAGE = "en"
 
-# Fallback voice when the requested language has no voice at all.
+# Used when the requested language has no voice at all.
 DEFAULT_EDGE_VOICE = "es-ES-AlvaroNeural"
 
-# Language forced at runtime through the set_language tool. None means "not
-# forced": the normal precedence applies. The value "auto" delegates to
-# detection over the text of each summary.
+# None means "not forced": normal precedence applies. "auto" delegates to
+# per-summary detection.
 _forced_language: str | None = None
-
-# Gender forced at runtime. Empty means "use the language default".
 _forced_gender: str = ""
 
-# edge-tts voice catalog, cached after the first fetch.
 _edge_catalog: dict[str, dict] = {}
 _catalog_loaded = False
 
-# Voice currently active on the sapi5 engine.
 _current_sapi5_voice = None  # type: ignore[assignment]
 
-# Pending voice requests. The worker thread consumes them in order.
+# Pending requests, consumed in order by the worker thread.
 _queue: queue.Queue[str | None] = queue.Queue()
 
-# Engine state, lazily initialized from the worker thread.
 _lock = threading.Lock()
 _sapi5_engine = None  # type: ignore[assignment]
 
@@ -205,10 +175,9 @@ def _play_mp3(path: str) -> None:
 # --------------------------------------------------------------------------
 # Language and voice selection
 # --------------------------------------------------------------------------
-# Preferred neural voice per language and gender: (female, male). The names
-# have been verified against the real edge-tts catalog; if one ever stops
-# existing, the lookup automatically falls back to any other voice with the
-# same language and gender.
+# (female, male) per language, verified against the live catalog. If a name
+# ever stops existing, the lookup falls back to another voice of the same
+# language and gender.
 VOICES_BY_LANGUAGE: dict[str, tuple[str, str]] = {
     "es": ("es-ES-XimenaNeural", "es-ES-AlvaroNeural"),
     "en": ("en-US-AvaNeural", "en-US-AndrewNeural"),
@@ -245,7 +214,6 @@ VOICES_BY_LANGUAGE: dict[str, tuple[str, str]] = {
     "ms": ("ms-MY-YasminNeural", "ms-MY-OsmanNeural"),
 }
 
-# Accepted aliases for the voice gender.
 GENDER_ALIASES = {
     "f": "female",
     "female": "female",
@@ -258,8 +226,7 @@ GENDER_ALIASES = {
 # Index of each gender inside the VOICES_BY_LANGUAGE tuples.
 GENDER_INDEX = {"female": 0, "male": 1}
 
-# Preferred regional variant per language, used when the curated voice does not
-# exist and another one from the same language has to be picked.
+# Used when the curated voice does not exist.
 LOCALE_BY_LANGUAGE: dict[str, str] = {
     "es": "es-ES",
     "en": "en-US",
@@ -296,8 +263,7 @@ LOCALE_BY_LANGUAGE: dict[str, str] = {
     "ms": "ms-MY",
 }
 
-# ISO 639-1 codes that need a readable name in tool messages, because the code
-# alone would be confusing.
+# Codes that need a readable name in tool messages.
 LANGUAGE_NAMES = {
     "zh": "Chinese",
     "ja": "Japanese",
@@ -324,8 +290,7 @@ def _effective_gender(language: str) -> str:
         return configured
 
     base = (language or "").lower().split("-")[0]
-    # If the language has a curated voice pair, default to the female voice
-    # unless the user asks otherwise.
+    # Curated languages default to the female voice unless told otherwise.
     return "female" if base in VOICES_BY_LANGUAGE else ""
 
 
@@ -461,7 +426,7 @@ def _edge_voice_for_language(
 
     catalog = _load_edge_catalog()
     if not catalog:
-        # Without a catalog only the curated voice can be used, if there is one.
+        # Offline: only the curated voice is usable.
         pair = VOICES_BY_LANGUAGE.get(base)
         if pair:
             return pair[GENDER_INDEX.get(gender, 0)]
@@ -475,29 +440,25 @@ def _edge_voice_for_language(
     index = GENDER_INDEX.get(gender, 0)
     curated = pair[index] if pair else None
 
-    # 1. Curated voice for the language, if its regional variant is the one
-    #    that was requested.
+    # An explicit region is respected before falling back to the language.
     if region and curated and curated in catalog:
         if catalog[curated].get("Locale", "").lower() == key:
             return curated
 
-    # 2. Voice of the requested gender inside the requested region.
     if region:
         picked = _pick_by_gender(catalog, by_locale.get(key, []), gender)
         if picked:
             return picked
 
-    # 3. Curated voice for the language with the requested gender.
     if curated and curated in catalog:
         return curated
 
-    # 4. Preferred regional variant of the language.
     regional = (LOCALE_BY_LANGUAGE.get(base) or "").lower()
     picked = _pick_by_gender(catalog, by_locale.get(regional, []), gender)
     if picked:
         return picked
 
-    # 5. Any voice of the language, in any regional variant.
+    # Last resort: any voice of that language, in any region.
     every = [
         name
         for name, info in catalog.items()
@@ -534,19 +495,18 @@ def _sapi5_voice_for_language(language: str, engine) -> str | None:
     key = language.lower()
     base, _, region = key.partition("-")
 
-    # 1. Exact regional variant, if one was requested.
+    # Exact regional variant, if one was requested.
     if region:
         for voice in voices:
             if matches(voice):
                 return voice.id
 
-    # 2. Any variant of the language.
     for pattern in (f"{base}-", f"_{base}-", f" {base} "):
         for voice in voices:
             if pattern in f"{voice.id} {voice.name}".lower():
                 return voice.id
 
-    # 3. The language appears as a standalone token in the identifier.
+    # Language as a standalone token in the identifier.
     for voice in voices:
         if base in f"{voice.id} {voice.name}".lower().replace("_", "-").split():
             return voice.id
@@ -695,28 +655,18 @@ _thread.start()
 @mcp.tool()
 def speak_summary(text: str) -> str:
     """
-    Reads a summary out loud through the system speakers.
-
-    Match the length of the summary to how much work was done: one short
-    sentence for a small change, and a fuller summary when the task was large
-    or had several steps. Do not read out literal code or details that add no
-    value; write in the first person.
-
-    If the summary exceeds the safety cap (MAX_SUMMARY_WORDS, 400 by default)
-    it is truncated automatically.
-
-    The voice language is selected automatically: by default the system
-    language, or whatever was set with set_language. There is no need to pass
-    a language.
+    Reads a summary out loud. Match its length to the work done: one short
+    sentence for a small change, a fuller summary for a large task. First
+    person, no literal code.
     """
     cleaned = " ".join(text.split()).strip()
     if not cleaned:
-        return "Nothing was played: the summary was empty."
+        return "Nothing played: empty summary."
 
     if ENGINE == "edge":
         problem = _validate_voice_name()
         if problem:
-            return f"Nothing was played: {problem}"
+            return f"Nothing played: {problem}"
 
     try:
         max_queue = int(MAX_QUEUE_SIZE)
@@ -725,16 +675,10 @@ def speak_summary(text: str) -> str:
         max_queue = 20
 
     if max_queue > 0 and _queue.qsize() >= max_queue:
-        logger.warning(
-            "Queue is full (%d pending); rejecting the request", max_queue
-        )
-        return (
-            f"Nothing was played: {max_queue} summaries are already queued. "
-            f"Wait for the queue to drain before sending more."
-        )
+        logger.warning("Queue is full (%d pending); rejecting", max_queue)
+        return f"Nothing played: {max_queue} summaries already queued."
 
     words = cleaned.split()
-    truncated = False
     try:
         cap = int(MAX_SUMMARY_WORDS)
     except ValueError:
@@ -743,202 +687,113 @@ def speak_summary(text: str) -> str:
 
     if cap > 0 and len(words) > cap:
         cleaned = " ".join(words[:cap]).rstrip(" ,;:.-")
-        truncated = True
         logger.warning("Summary truncated to %d words (sent %d)", cap, len(words))
+        _queue.put(cleaned)
+        return f"Played, truncated to {cap} words. Split the work for more detail."
 
-    response = f"Playing summary successfully: {cleaned}"
-    if truncated:
-        response += (
-            f" [Note: truncated to {cap} words for safety. Split the work into "
-            f"several calls if you need more detail.]"
-        )
     _queue.put(cleaned)
-    return response
+    return "Played."
 
 
 @mcp.tool()
 def list_voices() -> str:
     """
-    Shows which language and voice are in use right now, plus the synthesis
-    voices installed on the system.
+    Shows the language, gender and voice in use, and the alternatives for the
+    current language. For the full edge-tts catalog, run:
+    python -m edge_tts --list-voices
     """
-    import sys
-
     language = _resolve_language("")
-    language_origin = (
-        "forced at runtime"
-        if _forced_language is not None
-        else VOICE_LANGUAGE or "system language"
-    )
+    gender = _effective_gender(language) or "default"
     lines = [
         f"Engine: {ENGINE}",
-        f"Language: {_language_name(language)} (source: {language_origin})",
+        f"Language: {_language_name(language)}",
+        f"Gender: {gender}",
     ]
 
     if ENGINE == "edge":
-        gender = _effective_gender(language) or "no preference"
-        lines.append(f"Gender: {gender}")
-        lines.append(f"Voice in use: {_edge_voice_for_language(language, gender)}")
-        lines.append("")
+        lines.append(f"Voice: {_edge_voice_for_language(language, gender)}")
         if VOICE_NAME:
-            lines.append(
-                f"WARNING: VOICE_NAME is set to {VOICE_NAME}, so it overrides the "
-                f"automatic language and gender selection. These are the voices "
-                f"that would be used without it:"
-            )
-        else:
-            lines.append("Gender options for the current language:")
-        for label, value in (("female", "female"), ("male", "male")):
-            lines.append(
-                f"- {label}: "
-                f"{_edge_voice_for_language(language, value, ignore_name=True)}"
-            )
-        lines.append("")
+            lines.append(f"VOICE_NAME={VOICE_NAME} overrides all of the above.")
         lines.append(
-            "Languages with curated voices (female and male): "
-            + ", ".join(sorted(VOICES_BY_LANGUAGE))
+            "Alternatives: female="
+            f"{_edge_voice_for_language(language, 'female', ignore_name=True)} "
+            f"male={_edge_voice_for_language(language, 'male', ignore_name=True)}"
         )
         lines.append(
-            "For the full catalog of neural voices run: "
-            "python -m edge_tts --list-voices"
+            f"Curated languages: {len(VOICES_BY_LANGUAGE)}"
         )
         return "\n".join(lines)
 
     try:
         engine = _init_sapi5()
     except Exception as exc:  # noqa: BLE001
-        lines.append(
-            f"Could not initialize the sapi5 engine on {sys.platform}: {exc}. "
-            f"Check the system voice dependencies or set VOICE_ENGINE to 'edge'."
-        )
+        lines.append(f"sapi5 unavailable on this platform: {exc}")
         return "\n".join(lines)
 
     current = engine.getProperty("voice")
-    lines.append(f"Selected voice: {current}")
-    lines.append("")
-    lines.append("Installed voices:")
+    lines.append(f"Voice: {current}")
+    lines.append("Installed:")
     for voice in engine.getProperty("voices"):
-        marker = " (selected)" if voice.id == current else ""
+        marker = " *" if voice.id == current else ""
         lines.append(f"- {voice.id.split(chr(92))[-1]} | {voice.name}{marker}")
-    if sys.platform == "win32":
-        lines.append("")
-        lines.append(
-            "Higher quality voices (Microsoft Laura, Microsoft Pablo) require "
-            "registering the OneCore registry keys; run "
-            "register_voices_onecore.ps1 as administrator."
-        )
     return "\n".join(lines)
 
 
 @mcp.tool()
-def set_language(language: str, gender: str = "") -> str:
+def set_language(language: str = "", gender: str = "") -> str:
     """
-    Sets the language and, optionally, the voice gender for the next
-    utterances, without editing the configuration. Call this tool when the
-    user asks to speak another language or use another voice, for example
-    "speak in English", "switch to French" or "use a male voice".
+    Changes the voice language and gender, for when the user asks to speak
+    another language or use a different voice.
 
-    Accepts an ISO 639-1 code ("es", "en", "fr") or a code with a regional
-    variant ("pt-BR", "en-GB"). Gender accepts "female"/"male" and "f"/"m". Use
-    an empty string to go back to the system language, or "auto" to infer the
-    language from the text of each summary.
+    language: ISO code ("es", "en", "pt-BR"), "system" to follow the OS, or
+    "auto" to detect it per summary. Empty keeps the current one.
+    gender: "f"/"m", or "any" to follow the language default. Empty keeps the
+    current one.
     """
     global _forced_language, _forced_gender
 
-    gender_value = _normalize_gender(gender)
-    if gender.strip() and not gender_value:
-        return (
-            f"Unrecognized gender: {gender}. Use 'female' or 'male' "
-            f"(short forms 'f' and 'm' also work)."
-        )
-    if gender_value:
-        _forced_gender = gender_value
+    raw_gender = (gender or "").strip()
+    if raw_gender and raw_gender.lower() not in ("any", "auto"):
+        if not _normalize_gender(raw_gender):
+            return f"Unknown gender: {gender}. Use 'f', 'm' or 'any'."
+        _forced_gender = _normalize_gender(raw_gender)
+    elif raw_gender:
+        _forced_gender = ""
 
     value = (language or "").strip()
     if not value:
+        pass
+    elif value.lower() == "system":
         _forced_language = None
-        # Report the gender that will actually be used. Resetting the language
-        # does not touch the gender, so claiming it is unforced here would be
-        # wrong when set_gender was called earlier in the session.
-        effective = _forced_gender or _normalize_gender(VOICE_GENDER)
-        gender_text = (
-            f", gender {effective} (still forced)" if effective else ", gender not forced"
-        )
-        return (
-            f"Language reset to the system one: "
-            f"{_language_name(_system_language() or DEFAULT_LANGUAGE)}{gender_text}. "
-            f"Call set_gender('') to also reset the gender."
-        )
-
-    if value.lower() == "auto":
+    elif value.lower() == "auto":
         _forced_language = "auto"
-        return (
-            "Automatic detection enabled. The language is inferred from the text "
-            "of each summary. Keep in mind that on very short summaries detection "
-            "can fail, because language libraries answer with confident errors. "
-            "For a fixed language its code is always more reliable."
-        )
+    else:
+        value = value.replace("_", "-")
+        if not value.replace("-", "").isalnum():
+            return f"Invalid language: {language}. Try 'es', 'en' or 'pt-BR'."
+        _forced_language = value
 
-    value = value.replace("_", "-")
-    if not value.replace("-", "").isalnum():
-        return f"Invalid language: {language}. Use a code like 'es', 'en' or 'pt-BR'."
+    effective_language = _resolve_language("")
+    effective_gender = _forced_gender or _normalize_gender(VOICE_GENDER)
 
-    _forced_language = value
-
-    if ENGINE == "edge":
-        effective = gender_value or _effective_gender(value.lower())
-        voice = _edge_voice_for_language(value.lower(), effective)
-        return (
-            f"Language set to {_language_name(value)}. "
-            f"Voice selected: {voice} ({effective})."
-        )
-    warning = "" if gender_value else " Gender does not apply to sapi5."
-    return (
-        f"Language set to {_language_name(value)}. With the sapi5 engine the voice "
-        f"for that language will be used if it is installed on the system.{warning}"
-    )
-
-
-@mcp.tool()
-def set_gender(gender: str) -> str:
-    """
-    Changes the voice gender without touching the language. Call this tool when
-    the user asks for a male or female voice, for example "use a male voice".
-
-    Accepts "female"/"male" and "f"/"m". Use an empty string to go back to the
-    default gender for the language.
-    """
-    global _forced_gender
-
-    if not (gender or "").strip():
-        _forced_gender = ""
-        return "Gender reset to the default for the language."
-
-    value = _normalize_gender(gender)
-    if not value:
-        return (
-            f"Unrecognized gender: {gender}. Use 'female' or 'male' "
-            f"(short forms 'f' and 'm' also work)."
-        )
-
-    _forced_gender = value
     if ENGINE != "edge":
         return (
-            f"Gender set to {value}, but the sapi5 engine does not expose the gender "
-            f"of its voices, so it will not be applied. Use the edge engine to "
-            f"choose a voice by gender."
+            f"Language {_language_name(effective_language)}, gender "
+            f"{effective_gender or 'default'}. sapi5 only picks by language, and "
+            f"only if that voice is installed."
         )
 
-    language = _resolve_language("")
-    voice = _edge_voice_for_language(language, value)
+    voice = _edge_voice_for_language(effective_language, effective_gender)
+    state = f"Language {_language_name(effective_language)}, gender {effective_gender or 'default'}"
     if VOICE_NAME:
-        alternative = _edge_voice_for_language(language, value, ignore_name=True)
-        return (
-            f"Gender recorded as {value}, but VOICE_NAME still pins the voice to "
-            f"{VOICE_NAME}, so the change will not be heard. Remove VOICE_NAME from "
-            f"the configuration to choose by gender; {alternative} would be used."
+        wanted = _edge_voice_for_language(
+            effective_language, effective_gender, ignore_name=True
         )
-    return f"Gender set to {value}. Voice for {_language_name(language)}: {voice}."
+        return (
+            f"{state}. But VOICE_NAME pins the voice to {VOICE_NAME}, so you will "
+            f"hear that instead; {wanted} would be used without it."
+        )
+    return f"{state}. Voice: {voice}."
 
 
 if __name__ == "__main__":

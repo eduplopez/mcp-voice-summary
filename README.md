@@ -144,18 +144,15 @@ Or at runtime, without editing anything. The user can ask in natural language
 and the assistant calls the tool:
 
 ```
-set_language("en")            -> Voice: en-US-AvaNeural (female)
-set_language("pt-BR", "male")  -> Voice: pt-BR-AntonioNeural (male)
-set_language("")              -> back to the system language
-
-set_gender("male")             -> change only the gender
-set_gender("f")                -> same as "female"
-set_gender("")                 -> back to the language default
+set_language("en")             -> Language English (en), gender default
+set_language("pt-BR", "male")  -> Language Portuguese (pt), gender male
+set_language("", "f")           -> keep the language, switch to a female voice
+set_language("system")         -> back to the OS language
+set_language("", "any")         -> back to the language default gender
 ```
 
-Gender accepts `female`/`male` and `f`/`m`. A runtime change applies to the
-following utterances and lasts until the server restarts or the tool is called
-again with a different value.
+A runtime change applies to the following utterances and lasts until the server
+restarts or the tool is called again with a different value.
 
 > Gender **only works with the `edge` engine**. SAPI5 does not expose the gender
 > of its voices, so with `sapi5` the tool says so instead of pretending. Picking
@@ -370,17 +367,15 @@ notice.
 Shows which language and voice are in use right now, plus the voices installed
 on the system.
 
-### `set_language(language, gender="")`
+### `set_language(language="", gender="")`
 
-Sets the language and, optionally, the gender without editing the
-configuration. Accepts an ISO 639-1 code (`es`, `en`, `fr`), a regional variant
-(`pt-BR`, `en-GB`), `auto` to detect the language of each summary, or an empty
-string to go back to the system language.
+Sets the voice language and gender without editing the configuration.
 
-### `set_gender(gender)`
-
-Changes only the voice gender, keeping the language. Accepts `female`/`male`
-and `f`/`m`, or an empty string to go back to the default.
+- `language`: an ISO 639-1 code (`es`, `en`, `fr`), a regional variant
+  (`pt-BR`, `en-GB`), `"system"` to follow the OS, or `"auto"` to detect it per
+  summary. Empty keeps the current language.
+- `gender`: `"f"` or `"m"`, or `"any"` to follow the language default. Empty
+  keeps the current gender.
 
 ## Controlling the summary length
 
@@ -468,7 +463,7 @@ Always write in the first person, without reading out literal code.
 ```
 
 If the user asks to speak another language, use another voice, or a male or
-female voice, call `set_language` or `set_gender`. The language defaults to the
+female voice, call `set_language`. The language defaults to the
 system one, so it does not need configuring.
 
 ## Privacy and security
@@ -511,8 +506,8 @@ offline and nothing ever leaves the machine.
 
 ### Known limitations
 
-- **Voice and language are process-global.** `set_language` and `set_gender`
-  change the state of the whole server, so if two MCP sessions talk to the same
+- **Voice and language are process-global.** `set_language`
+  changes the state of the whole server, so if two MCP sessions talk to the same
   server process, one can change the voice for the other. This does not matter
   for the intended single-user local setup, but it is not per-session isolation.
 - **`VOICE_PLAYER` executes a program.** That is its purpose, and it is only
