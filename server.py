@@ -118,6 +118,18 @@ _queue: queue.Queue[tuple[str, float] | None] = queue.Queue()
 _admission_lock = threading.Lock()
 _notif_times: list[float] = []
 _last_text = ""
+# Counters for list_voices. Deliberately no new tool: every tool costs context
+# on every turn, and diagnostics do not need one.
+_counters: dict[str, int] = {
+    "accepted": 0,
+    "rate_limited": 0,
+    "queue_full": 0,
+    "deduplicated": 0,
+    "truncated": 0,
+    "redacted": 0,
+    "stale_dropped": 0,
+    "playback_errors": 0,
+}
 _lock = threading.Lock()
 _sapi5_engine = None  # type: ignore[assignment]
 
@@ -169,29 +181,64 @@ def _sanitize(text: str, engine: str = "") -> str:
 # leak, so the high-signal patterns are removed before anything else happens.
 _SECRET_PATTERNS = [
     # Private key blocks, whole and unreadable.
-    (re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY-----.*?-----END[A-Z ]*PRIVATE KEY-----", re.S), "[redacted key]", "{M}"),
+    re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY-----.*?-----END[A-Z ]*PRIVATE KEY-----", re.S),
     # Vendor-prefixed tokens: OpenAI, GitHub, Slack, Google, AWS access keys.
-    (re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_\-]{16,}"), "[redacted token]", "{M}"),
-    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "[redacted token]", "{M}"),
-    (re.compile(r"\bxox[abposr]-[A-Za-z0-9\-]{10,}"), "[redacted token]", "{M}"),
-    (re.compile(r"\bAIza[0-9A-Za-z_\-]{30,}"), "[redacted token]", "{M}"),
-    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted key]", "{M}"),
-    # Authorization headers and JWTs.
-    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{12,}"), "[redacted token]", "{M}"),
-    (re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{6,}"), "[redacted token]", "{M}"),
-    # key=value assignments: the key stays readable, only the value is dropped.
-    (
-        re.compile(
-            r"(?i)(\b(?:api[_-]?key|secret|passwd|password|token|access[_-]?key|"
-            r"client[_-]?secret|private[_-]?key|auth)\b\s*[=:]\s*)"
-            r"[\"']?([^\s\"',;]{6,})[\"']?"
-        ),
-        "[redacted]",
-        r"\1{M}",
+    re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bxox[abposr]-[A-Za-z0-9\-]{10,}"),
+    re.compile(r"\bAIza[0-9A-Za-z_\-]{30,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    # Authorization headers and JWTs. \s spans newlines, so a header split over
+    # two lines is still caught.
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{12,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{6,}"),
+    # key=value assignments, tolerant of spacing, quotes, dashes and case.
+    re.compile(
+        r"(?i)\b(?:api[_\-]?key|secret|passwd|password|token|access[_\-]?key|"
+        r"client[_\-]?secret|private[_\-]?key|auth)\b\s*[=:]\s*"
+        r"[\"']?[^\s\"',;]{6,}[\"']?"
     ),
     # Email addresses and anything else shaped like one.
-    (re.compile(r"\b[\w.+\-]+@[\w\-]+\.[\w.\-]+\b"), "[redacted email]", "{M}"),
+    re.compile(r"\b[\w.+\-]+@[\w\-]+\.[\w.\-]+\b"),
 ]
+
+
+def _redact(text: str) -> str:
+    """Removes credentials and personal addresses from the text.
+
+    Every pattern is matched against the original string and the spans are
+    merged before a single replacement pass. Replacing in phases instead, with
+    placeholders, lets one pattern re-match what another already produced:
+    "api_key=sk-x" became "api_key=[redacted token]" and then, on a second
+    call, "api_key=[redacted] token]". Span merging removes that whole class of
+    bug and makes the function idempotent, since "[redacted]" matches nothing.
+    """
+    if not REDACT or not text:
+        return text
+
+    spans: list[list[int]] = []
+    for pattern in _SECRET_PATTERNS:
+        for match in pattern.finditer(text):
+            spans.append([match.span()[0], match.span()[1]])
+    if not spans:
+        return text
+
+    spans.sort()
+    merged: list[list[int]] = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+
+    out: list[str] = []
+    cursor = 0
+    for start, end in merged:
+        out.append(text[cursor:start])
+        out.append("[redacted]")
+        cursor = end
+    out.append(text[cursor:])
+    return "".join(out)
 
 
 def _admit(text: str, max_queue: int) -> str:
@@ -205,6 +252,7 @@ def _admit(text: str, max_queue: int) -> str:
 
     with _admission_lock:
         if max_queue > 0 and _queue.qsize() >= max_queue:
+            _counters["queue_full"] += 1
             return f"Nothing played: {max_queue} summaries already queued."
 
         limit = _timeout(VOICE_RATE_LIMIT, 30)
@@ -212,31 +260,19 @@ def _admit(text: str, max_queue: int) -> str:
         while _notif_times and _notif_times[0] < cutoff:
             _notif_times.pop(0)
         if limit > 0 and len(_notif_times) >= limit:
+            _counters["rate_limited"] += 1
             return f"Nothing played: rate limit of {limit} per minute reached."
 
         if _last_text and _last_text == text:
+            _counters["deduplicated"] += 1
             return "Skipped: identical to the previous summary."
 
         _notif_times.append(time.monotonic())
         _last_text = text
+        _counters["accepted"] += 1
     return ""
 
 
-def _redact(text: str) -> str:
-    """Removes credentials and personal addresses from the text.
-
-    Replacements go through placeholders so that a later pattern cannot match
-    text an earlier one already redacted, which would otherwise mangle the
-    marker itself (for example turning "[redacted token]" into
-    "[redacted] token]").
-    """
-    if not REDACT:
-        return text
-    for index, (pattern, _, template) in enumerate(_SECRET_PATTERNS):
-        text = pattern.sub(template.replace("{M}", f"\x01{index}\x01"), text)
-    for index, (_, label, _) in enumerate(_SECRET_PATTERNS):
-        text = text.replace(f"\x01{index}\x01", label)
-    return text
 
 
 # --------------------------------------------------------------------------
@@ -792,10 +828,12 @@ def _voice_worker() -> None:
             if VOICE_MUTE:
                 continue
             if max_age > 0 and time.monotonic() - enqueued_at > max_age:
+                _counters["stale_dropped"] += 1
                 logger.info("Dropped a summary that waited too long to be spoken")
                 continue
             speak(text)
         except Exception:  # noqa: BLE001 - speech must never take the server down
+            _counters["playback_errors"] += 1
             # The summary can contain file names, error text or other sensitive
             # detail, so it is never written to the log. A short digest is
             # enough to correlate a log line with a call.
@@ -829,7 +867,10 @@ def speak_summary(text: str) -> str:
     sentence for a small change, a fuller summary for a large task. First
     person, no literal code, no credentials or personal data.
     """
-    cleaned = _sanitize(_redact(text))
+    redacted = _redact(text)
+    if redacted != text:
+        _counters["redacted"] += 1
+    cleaned = _sanitize(redacted)
     if not cleaned:
         return "Nothing played: empty summary."
 
@@ -849,6 +890,7 @@ def speak_summary(text: str) -> str:
     if cap > 0 and len(words) > cap:
         cleaned = " ".join(words[:cap]).rstrip(" ,;:.-")
         truncated = True
+        _counters["truncated"] += 1
         logger.warning("Summary truncated to %d words (sent %d)", cap, len(words))
 
     _queue.put((cleaned, time.monotonic()))
@@ -890,6 +932,10 @@ def list_voices() -> str:
         )
         lines.append(
             f"Curated languages: {len(VOICES_BY_LANGUAGE)}"
+        )
+        lines.append(
+            "Counters: "
+            + " ".join(f"{k}={v}" for k, v in sorted(_counters.items()))
         )
         return "\n".join(lines)
 

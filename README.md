@@ -517,10 +517,18 @@ offline and nothing ever leaves the machine.
   Replacements go through placeholders so one pattern cannot mangle another's
   output. Turn it off with `VOICE_REDACT=0` only if summaries never carry
   anything sensitive.
+- **Redaction is a single pass over merged spans**, not a chain of substitutions.
+  Matching every pattern against the original text and replacing once means no
+  pattern can re-match another one's output, and the function is idempotent:
+  redacting twice gives the same string.
 - **Abuse is bounded on three axes.** The queue size stops a burst, the rate
   limit stops sustained spam that would otherwise slip past a size check, and
   consecutive identical summaries are skipped. All three run under one lock, so
   concurrent handlers cannot exceed the limits.
+- **Counters, not more tools.** `list_voices` reports accepted, rate-limited,
+  queue-full, deduplicated, truncated, redacted, stale-dropped and error counts.
+  Diagnostics do not deserve a fourth tool when every tool costs context on
+  every turn.
 - **Stale notifications are dropped.** A summary that waited more than
   `MAX_SUMMARY_AGE` is discarded instead of being read out minutes after the work
   finished.
@@ -557,10 +565,25 @@ audio, so it runs offline in a couple of seconds:
 
 ### Known limitations
 
+- **Redaction is defensive, not exhaustive.** It catches private key blocks,
+  the common provider token formats, JWTs, `key=value` secrets and email
+  addresses. It will not catch a base64 blob with no marker, a secret spelled
+  with Unicode lookalike characters, or an unusual internal format. Do not rely
+  on it as your only control. Also, because spans are replaced whole, the
+  surrounding context of a match is dropped too.
 - **Voice and language are process-global.** `set_language`
   changes the state of the whole server, so if two MCP sessions talk to the same
   server process, one can change the voice for the other. This does not matter
   for the intended single-user local setup, but it is not per-session isolation.
+- **Unexpected tool arguments are ignored, not rejected.** The SDK derives the
+  schema from the function signature and offers no way to set
+  `additionalProperties: false`. Passing `tts_endpoint` or `api_key` to
+  `speak_summary` is silently dropped and has no effect, verified by calling the
+  tool with extra fields. Ignored is safe here because no argument the model can
+  pass reaches the network, the filesystem or a command line.
+- **Sync tool bodies run on a worker thread**, not the event loop: the SDK
+  dispatches them through `anyio.to_thread.run_sync`, so the redaction regexes
+  cannot stall the server.
 - **`VOICE_PLAYER` executes a program.** That is its purpose, and it is only
   read from your own configuration, but do not build it from untrusted input.
 - **`langdetect` accuracy.** Covered in detail in
