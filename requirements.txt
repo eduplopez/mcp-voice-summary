@@ -17,8 +17,8 @@
 # it, which keeps the project cross-platform with no system dependencies.
 
 mcp>=2.0,<3
-edge-tts>=7.0
-langdetect>=1.0.9
+edge-tts>=7.0,<8
+langdetect>=1.0.9,<2
 
 # Optional sapi5 engine. Uncomment if you plan to use it:
 # pyttsx3>=2.90

@@ -114,6 +114,8 @@ Everything is controlled through environment variables.
 | `VOICE_PLAYER` | path or name | auto-detected | Forced MP3 player |
 | `MAX_SUMMARY_WORDS` | integer | `400` | Safety cap on words per summary |
 | `MAX_QUEUE_SIZE` | integer | `20` | Maximum summaries waiting to be spoken |
+| `PLAYBACK_TIMEOUT` | seconds | `30` | Gives up on playback that never returns |
+| `VOICE_MUTE` | `1`, `true`, `yes` | unset | Silent mode: still queues, plays nothing |
 
 `VOICE_RATE` and `VOICE_VOLUME` accept both an absolute notation (the SAPI5
 scale, where 100 is normal) and a relative one (`+10%`, `-15%`). The server
@@ -491,18 +493,47 @@ offline and nothing ever leaves the machine.
 - **No shell.** The external audio player is invoked with an argument list, never
   with `shell=True`. `VOICE_PLAYER` must resolve to a real executable through
   `shutil.which`.
-- **stdout is never used for logging.** On a stdio MCP server stdout carries the
-  JSON-RPC stream, so a stray `print` from a dependency would corrupt the
-  protocol. Anything printed while the synthesizer is imported is redirected to
-  stderr.
+- **Child processes cannot touch stdin.** On a stdio MCP server, stdin and stdout
+  carry the JSON-RPC stream. A player started without `stdin=DEVNULL` can drain
+  protocol messages meant for the server; this was verified with a reader child
+  and is now blocked, along with `timeout` and piped output.
+- **stdout is never used for logging.** Anything printed while the synthesizer is
+  imported is redirected to stderr.
+- **Timeouts everywhere.** Both the network synthesis call and the player process
+  give up after `PLAYBACK_TIMEOUT` instead of hanging the worker forever.
+- **Input is sanitized.** Control characters and markup are stripped, so the text
+  is only ever spoken. edge-tts escapes for SSML itself, but sapi5 hands the text
+  straight to the OS synthesizer.
+- **Summaries are never written to the log.** On failure the log records the word
+  count and a short sha256 digest, so lines can be correlated without persisting
+  file names, error text or secrets.
 - **Voice names are validated against the live catalog** before anything is
   queued, so a typo in `VOICE_NAME` fails immediately with a helpful message
   instead of after a wasted network round trip.
 - **The queue is bounded** by `MAX_QUEUE_SIZE`. Without a cap, a client calling
   `speak_summary` faster than playback could grow the queue without limit and
   exhaust memory. Requests over the cap are rejected, not silently dropped.
+- **Tool annotations** declare the side effects: `speak_summary` is not read-only,
+  not idempotent and touches the outside world.
 - **No dynamic code execution.** There is no `eval`, `exec`, `pickle`, or
   `os.system` anywhere in the source.
+
+### Silent mode
+
+Set `VOICE_MUTE=1` to keep the server running without making any sound. Summaries
+are still validated, queued and acknowledged, which makes it safe to leave the
+server enabled in an office or a meeting. `speak_summary` answers `"Muted."` so
+you can tell the difference from a real playback.
+
+## Tests
+
+The suite covers input handling, queue limits, voice resolution, the platform
+fallbacks, the privacy of the logs and the token budget. It never plays real
+audio, so it runs offline in a couple of seconds:
+
+```sh
+.venv\Scripts\python.exe -m unittest discover -s tests
+```
 
 ### Known limitations
 

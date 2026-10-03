@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -36,6 +38,7 @@ import threading
 import time
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import ToolAnnotations
 
 mcp = MCPServer("VoiceSummaryServer")
 
@@ -48,6 +51,13 @@ VOICE_VOLUME = os.environ.get("VOICE_VOLUME", "100").strip()
 
 # Empty means auto-detect.
 VOICE_PLAYER = os.environ.get("VOICE_PLAYER", "").strip()
+
+# Blocks playback that never returns (a wedged player or a hung HTTP call).
+PLAYBACK_TIMEOUT = os.environ.get("PLAYBACK_TIMEOUT", "30").strip()
+
+# Silences the server without disabling it: summaries are still queued and
+# acknowledged, nothing is played. Useful in shared spaces and meetings.
+VOICE_MUTE = os.environ.get("VOICE_MUTE", "").strip().lower() in ("1", "true", "yes")
 
 # "" system language, "es" ISO 639-1, "pt-BR" language + region, "auto" detect
 # per summary. Overridable at runtime with set_language.
@@ -107,6 +117,29 @@ def _normalize_percentage(value: str, default: int = 0) -> str:
     return f"{absolute - 100:+d}%"
 
 
+def _timeout(value: str, default: int) -> int:
+    """Parses a timeout in seconds, falling back when it is unusable."""
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        logger.warning("Invalid timeout %r; using %d seconds", value, default)
+        return default
+    return seconds if seconds > 0 else default
+
+
+# Control characters make some engines choke. edge-tts escapes the text for
+# SSML itself, but sapi5 hands it straight to the OS synthesizer, and even on
+# edge a stray tag would be read out loud. Strip both everywhere.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_TAGS = re.compile(r"<[^>]*>")
+
+
+def _sanitize(text: str, engine: str = "") -> str:
+    """Strips control characters and markup so the text is only ever spoken."""
+    cleaned = _TAGS.sub(" ", _CONTROL_CHARS.sub(" ", text))
+    return " ".join(cleaned.split())
+
+
 # --------------------------------------------------------------------------
 # Cross-platform MP3 playback
 # --------------------------------------------------------------------------
@@ -152,7 +185,18 @@ def _play_with_external(path: str) -> None:
             continue
         command = [path if p == "{path}" else p for p in template]
         command[0] = executable
-        subprocess.run(command, check=True)
+        # DEVNULL on stdin is mandatory, not cosmetic: stdout/stdin carry the
+        # MCP JSON-RPC stream, so a child that inherited stdin could consume
+        # protocol messages meant for this server. Verified that a reader child
+        # does drain it without this.
+        subprocess.run(
+            command,
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_timeout(PLAYBACK_TIMEOUT, 30),
+        )
         return
 
     raise RuntimeError(
@@ -621,7 +665,12 @@ def _speak_edge(text: str) -> None:
     voice = _edge_voice_for_language(language)
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "summary.mp3")
-        asyncio.run(_render_mp3_async(text, path, voice))
+        seconds = _timeout(PLAYBACK_TIMEOUT, 30)
+        try:
+            asyncio.run(asyncio.wait_for(_render_mp3_async(text, path, voice), seconds))
+        except asyncio.TimeoutError:
+            logger.warning("edge-tts timed out after %ds", seconds)
+            return
         _play_mp3(path)
 
 
@@ -638,9 +687,18 @@ def _voice_worker() -> None:
             _queue.task_done()
             return
         try:
+            if VOICE_MUTE:
+                continue
             speak(text)
         except Exception:  # noqa: BLE001 - speech must never take the server down
-            logger.exception("Could not play the summary: %s", text)
+            # The summary can contain file names, error text or other sensitive
+            # detail, so it is never written to the log. A short digest is
+            # enough to correlate a log line with a call.
+            logger.exception(
+                "Could not play the summary (%d words, sha256 %s)",
+                len(text.split()),
+                hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:12],
+            )
         finally:
             _queue.task_done()
 
@@ -652,14 +710,21 @@ _thread.start()
 # --------------------------------------------------------------------------
 # Tools
 # --------------------------------------------------------------------------
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    )
+)
 def speak_summary(text: str) -> str:
     """
     Reads a summary out loud. Match its length to the work done: one short
     sentence for a small change, a fuller summary for a large task. First
     person, no literal code.
     """
-    cleaned = " ".join(text.split()).strip()
+    cleaned = _sanitize(text, ENGINE)
     if not cleaned:
         return "Nothing played: empty summary."
 
@@ -692,10 +757,17 @@ def speak_summary(text: str) -> str:
         return f"Played, truncated to {cap} words. Split the work for more detail."
 
     _queue.put(cleaned)
-    return "Played."
+    return "Muted." if VOICE_MUTE else "Played."
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=True,
+    )
+)
 def list_voices() -> str:
     """
     Shows the language, gender and voice in use, and the alternatives for the
@@ -739,7 +811,14 @@ def list_voices() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations=ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+)
 def set_language(language: str = "", gender: str = "") -> str:
     """
     Changes the voice language and gender, for when the user asks to speak
