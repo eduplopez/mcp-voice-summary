@@ -76,6 +76,14 @@ MAX_SUMMARY_AGE = os.environ.get("MAX_SUMMARY_AGE", "120").strip()
 # spread over time, which the queue size limit alone does not catch.
 VOICE_RATE_LIMIT = os.environ.get("VOICE_RATE_LIMIT", "30").strip()
 
+# How much of the summary is spoken:
+#   full  the sanitized summary, as submitted (default)
+#   short a fixed generic message, so no summary content ever reaches the
+#         speakers or the cloud engine. Useful where the text may mention
+#         confidential details, or where redaction would mangle it.
+VOICE_MODE = os.environ.get("VOICE_MODE", "full").strip().lower()
+GENERIC_MESSAGE = "Task completed."
+
 # "" system language, "es" ISO 639-1, "pt-BR" language + region, "auto" detect
 # per summary. Overridable at runtime with set_language.
 VOICE_LANGUAGE = os.environ.get("VOICE_LANGUAGE", "").strip()
@@ -883,6 +891,9 @@ def speak_summary(text: str) -> str:
     refused = _admit(cleaned, max_queue)
     if refused:
         return refused
+
+    if VOICE_MODE == "short":
+        cleaned = GENERIC_MESSAGE
 
     words = cleaned.split()
     cap = _timeout(MAX_SUMMARY_WORDS, 400)

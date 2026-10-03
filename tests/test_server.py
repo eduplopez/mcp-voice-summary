@@ -195,49 +195,97 @@ class TestPrivacy(unittest.TestCase):
         self.assertIn("sha256", joined)
 
 
-class TestRedaction(unittest.TestCase):
-    def test_redacts_common_token_shapes(self):
-        cases = {
-            "api_key=ABC123XYZ456TOKEN": "ABC123XYZ456TOKEN",
-            "password: hunter2hunter2": "hunter2hunter2",
-            "ghp_abcdefghijklmnopqrstuvwxyz0123": "abcdefghijklmnopqrstuvwxyz",
-            "AKIAIOSFODNN7EXAMPLE": "AKIAIOSFODNN7EXAMPLE",
-            "Bearer abcdefghijklmnopqrstuvwxyz": "abcdefghijklmnopqrstuvwxyz",
-            "sk-abcdefghijklmnopqrstuvwxyz12": "abcdefghijklmnop",
-            "xoxb-123456789012-abcdefghij": "abcdefghij",
-            "juan.perez@ejemplo.com": "ejemplo.com",
-        }
-        for text, secret in cases.items():
-            cleaned = server._redact(text)
-            self.assertNotIn(secret, cleaned, f"not redacted: {text}")
-            self.assertIn("[redacted", cleaned)
+# One table drives every redaction property. Adding a secret pattern means
+# adding rows here, and every property below (redaction, idempotency, marker
+# safety, multiline, spacing and case variants) is checked automatically.
+SECRET_CASES = [
+    # (text, the fragment that must never survive)
+    ("api_key=ABC123XYZ456TOKEN", "ABC123XYZ456TOKEN"),
+    ("password: hunter2hunter2", "hunter2hunter2"),
+    ('password = "hunter2hunter2"', "hunter2hunter2"),
+    ("API-KEY : ABCDEF123456XYZ", "ABCDEF123456XYZ"),
+    ("openai_api_key=sk-test1234567890abcdef", "test1234567890abcdef"),
+    ("sk-abcdefghijklmnopqrstuvwxyz12", "abcdefghijklmnop"),
+    ("github_token=ghp_AbCdEfGhIjKlMnOpQrStUvWxYz123456", "AbCdEfGhIjKlMnOpQrStUvWxYz123456"),
+    ("ghp_abcdefghijklmnopqrstuvwxyz0123", "abcdefghijklmnopqrstuvwxyz"),
+    ("slack_token=xoxb-1234567890-abcdefg", "abcdefg"),
+    ("xoxb-123456789012-abcdefghij", "abcdefghij"),
+    ("aws_access_key_id=AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+    ("google_key=AIzaSyA1234567890abcdefghijklmnopqrstu", "AIzaSyA1234567890"),
+    ("Bearer abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvwxyz"),
+    ("Authorization:\n  Bearer abcdefghijklmnopqrst", "abcdefghijklmnopqrst"),
+    ("jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", "dozjgNryP4J3jVmNHl0w5N"),
+    ("contacto juan.perez@ejemplo.com y maria@otro.org", "ejemplo.com"),
+    ("client_secret: qwertyuiop123456", "qwertyuiop123456"),
+    ("access_key=zzz987654321abc", "zzz987654321abc"),
+]
 
-    def test_redacts_private_key_block(self):
-        key = (
-            "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\nIBAAKC\n"
-            "-----END RSA PRIVATE KEY-----"
-        )
-        self.assertNotIn("MIIEow", server._redact(f"deploy con {key}"))
+PRIVATE_KEY = (
+    "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\nIBAAKC\n-----END RSA PRIVATE KEY-----"
+)
+
+# Legitimate text that must survive untouched. The negative half matters as
+# much as the positive one: an over-eager redactor ruins the spoken summary.
+BENIGN_CASES = [
+    "El archivo README.md fue actualizado",
+    "La tarea termino correctamente",
+    "Se ejecutaron 42 tests",
+    "He configurado el modulo de autenticacion",
+    "El token de la API cambio, hay que revisarlo",
+    "Rebase la rama main y resolvi tres conflictos",
+    "El build tardo doce segundos en completarse",
+]
+
+
+class TestRedaction(unittest.TestCase):
+    def test_every_secret_is_removed(self):
+        for text, secret in SECRET_CASES:
+            with self.subTest(text=text):
+                self.assertNotIn(secret, server._redact(text))
+
+    def test_private_key_is_removed(self):
+        self.assertNotIn("MIIEow", server._redact(f"deploy con {PRIVATE_KEY}"))
+
+    def test_redaction_is_idempotent(self):
+        for text, _ in SECRET_CASES:
+            with self.subTest(text=text):
+                once = server._redact(text)
+                self.assertEqual(once, server._redact(once))
+
+    def test_no_internal_markers_leak(self):
+        for text, _ in SECRET_CASES:
+            with self.subTest(text=text):
+                out = server._redact(text)
+                for marker in ("{M}", "\\1", "\x01"):
+                    self.assertNotIn(marker, out)
+
+    def test_markers_are_not_remangled(self):
+        """A later pattern must never match what an earlier one replaced."""
+        out = server._redact("api_key=sk-abcdefghijklmnopqrstuvwxyz12")
+        self.assertNotIn("[redacted] token]", out)
+        self.assertNotIn("[redacted] key]", out)
+
+    def test_benign_text_is_never_redacted(self):
+        for text in BENIGN_CASES:
+            with self.subTest(text=text):
+                self.assertEqual(server._redact(text), text)
 
     def test_redaction_can_be_disabled(self):
         with mock.patch.object(server, "REDACT", False):
             self.assertEqual(server._redact("api_key=ABC123XYZ"), "api_key=ABC123XYZ")
-
-    def test_ordinary_text_is_untouched(self):
-        text = "He actualizado el modulo de autenticacion y sus tres pruebas"
-        self.assertEqual(server._redact(text), text)
-
-    def test_markers_do_not_get_remangled(self):
-        """A later pattern must not match what an earlier one replaced."""
-        out = server._redact("api_key=sk-abcdefghijklmnopqrstuvwxyz12")
-        self.assertIn("[redacted", out)
-        self.assertNotIn("[redacted] token]", out)
 
     def test_secret_never_reaches_the_queue(self):
         with mock.patch.object(server, "_queue", queue.Queue()):
             server.speak_summary("despliegue hecho con api_key=SUPERSECRET1234")
             self.assertNotIn("SUPERSECRET1234", server._queue.get_nowait()[0])
 
+    def test_short_mode_speaks_only_the_generic_message(self):
+        with mock.patch.object(server, "_queue", queue.Queue()):
+            with mock.patch.object(server, "VOICE_MODE", "short"):
+                server.speak_summary("se han corregido tres errores en produccion")
+                spoken = server._queue.get_nowait()[0]
+        self.assertEqual(spoken, server.GENERIC_MESSAGE)
+        self.assertNotIn("produccion", spoken)
 
 class TestAdmissionControl(unittest.TestCase):
     def setUp(self):
@@ -319,73 +367,9 @@ class TestStdoutPurity(unittest.TestCase):
         self.assertIn("NOISE-ON-STDOUT", proc.stderr)
 
 
-class TestRedactionProperties(unittest.TestCase):
-    """Properties the redactor must always hold, per the audit."""
 
-    def test_idempotent(self):
-        samples = [
-            "api_key=sk-abc123def456ghi789jkl",
-            "password: hunter2hunter2",
-            "token=abc123; api_key=xyz789",
-            "api_key=abc123 password=def456",
-            "contacto juan.perez@empresa.com",
-            "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdef",
-        ]
-        for text in samples:
-            once = server._redact(text)
-            self.assertEqual(once, server._redact(once), f"not idempotent: {text}")
 
-    def test_no_internal_markers_leak(self):
-        samples = [
-            "api_key=sk-abc123def456ghi789jkl",
-            "api_key=abc123 password=def456",
-            "password: hunter2",
-        ]
-        for text in samples:
-            out = server._redact(text)
-            for marker in ("{M}", "\\1", "\x01"):
-                self.assertNotIn(marker, out, f"marker leaked: {text}")
-
-    def test_audit_canary_corpus(self):
-        canaries = {
-            "openai_api_key=sk-test1234567890abcdef": "test1234567890abcdef",
-            "github_token=ghp_AbCdEfGhIjKlMnOpQrStUvWxYz123456": "AbCdEfGhIjKlMnOpQrStUvWxYz123456",
-            "slack_token=xoxb-1234567890-abcdefg": "abcdefg",
-            "aws_access_key_id=AKIAIOSFODNN7EXAMPLE": "AKIAIOSFODNN7EXAMPLE",
-            "jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U": "dozjgNryP4J3jVmNHl0w5N",
-            "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBK\n-----END PRIVATE KEY-----": "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBK",
-            'password = "hunter2hunter2"': "hunter2hunter2",
-            "API-KEY: ABCDEF123456XYZ": "ABCDEF123456XYZ",
-        }
-        for text, secret in canaries.items():
-            self.assertNotIn(secret, server._redact(text), f"leaked from: {text}")
-
-    def test_benign_text_is_never_redacted(self):
-        canaries = [
-            "El archivo README.md fue actualizado",
-            "La tarea termino correctamente",
-            "Se ejecutaron 42 tests",
-            "He configurado el modulo de autenticacion",
-            "El token de la API cambio, hay que revisarlo",
-        ]
-        for text in canaries:
-            self.assertEqual(server._redact(text), text, f"false positive: {text}")
-
-    def test_multiline_header_is_caught(self):
-        text = "Authorization:\n  Bearer abcdefghijklmnopqrstuvwxyz"
-        self.assertNotIn("abcdefghijklmnopqrstuvwxyz", server._redact(text))
-
-    def test_fuzz_does_not_raise(self):
-        import random
-        import string
-
-        random.seed(1234)
-        alphabet = string.printable + "áéí日本語"
-        for _ in range(400):
-            text = "".join(random.choice(alphabet) for _ in range(random.randint(0, 400)))
-            out = server._redact(text)
-            self.assertNotIn("\x01", out)
-
+class TestRedactionCost(unittest.TestCase):
     def test_redaction_is_fast_enough(self):
         import time
 

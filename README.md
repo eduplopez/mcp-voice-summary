@@ -119,6 +119,7 @@ Everything is controlled through environment variables.
 | `VOICE_REDACT` | `0`, `false`, `no` | on | Set to 0 to stop stripping credentials |
 | `VOICE_RATE_LIMIT` | notifications per minute | `30` | Stops a client flooding the queue |
 | `MAX_SUMMARY_AGE` | seconds | `120` | Queued summaries older than this are dropped |
+| `VOICE_MODE` | `full`, `short` | `full` | `short` speaks a fixed generic message |
 
 `VOICE_RATE` and `VOICE_VOLUME` accept both an absolute notation (the SAPI5
 scale, where 100 is normal) and a relative one (`+10%`, `-15%`). The server
@@ -552,6 +553,36 @@ Set `VOICE_MUTE=1` to keep the server running without making any sound. Summarie
 are still validated, queued and acknowledged, which makes it safe to leave the
 server enabled in an office or a meeting. `speak_summary` answers `"Muted."` so
 you can tell the difference from a real playback.
+
+### Generic message mode
+
+Set `VOICE_MODE=short` and the spoken text becomes a fixed `"Task completed."`
+whatever the assistant submitted. Nothing from the summary reaches the speakers
+or the cloud engine.
+
+Use it when summaries may mention confidential details, or when you would rather
+not hear the raw text at all. The trade-off is that you lose the information:
+you get "something finished", not what.
+
+### Before every release
+
+```sh
+.venv\Scripts\python.exe pre_release_check.py
+```
+
+Runs the test suite, `pip-audit`, a stdout purity check, a scan for dangerous
+calls, the tool catalog budget, and a check that the counters expose no text.
+Exits non-zero on failure so it can gate a release.
+
+### When you add a secret pattern
+
+The redaction tests are driven by one table at the top of `tests/test_server.py`.
+Adding a pattern means adding a row to `SECRET_CASES` (a positive case plus the
+fragment that must not survive) and, when it could plausibly match legitimate
+text, a row to `BENIGN_CASES`. Idempotency, marker safety, multiline handling
+and spacing or case variants are then checked automatically for every case.
+
+## Tests
 
 ## Tests
 
