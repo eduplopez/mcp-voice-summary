@@ -788,12 +788,17 @@ def set_language(language: str, gender: str = "") -> str:
     value = (language or "").strip()
     if not value:
         _forced_language = None
+        # Report the gender that will actually be used. Resetting the language
+        # does not touch the gender, so claiming it is unforced here would be
+        # wrong when set_gender was called earlier in the session.
+        effective = _forced_gender or _normalize_gender(VOICE_GENDER)
         gender_text = (
-            f", gender {gender_value}" if gender_value else ", gender not forced"
+            f", gender {effective} (still forced)" if effective else ", gender not forced"
         )
         return (
             f"Language reset to the system one: "
-            f"{_language_name(_system_language() or DEFAULT_LANGUAGE)}{gender_text}."
+            f"{_language_name(_system_language() or DEFAULT_LANGUAGE)}{gender_text}. "
+            f"Call set_gender('') to also reset the gender."
         )
 
     if value.lower() == "auto":
