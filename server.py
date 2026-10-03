@@ -38,11 +38,13 @@ Implementation notes:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import queue
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -79,6 +81,12 @@ VOICE_GENDER = os.environ.get("VOICE_GENDER", "").strip().lower()
 # prevents accidental multi-minute announcements from an oversized `text`.
 # Defaults to 400 words, roughly 2-3 minutes.
 MAX_SUMMARY_WORDS = os.environ.get("MAX_SUMMARY_WORDS", "400").strip()
+
+# Maximum number of summaries waiting to be spoken. The queue is otherwise
+# unbounded, so a client looping over speak_summary faster than playback could
+# grow it without limit and exhaust memory. Requests beyond the cap are
+# rejected instead of dropped, so the caller always knows.
+MAX_QUEUE_SIZE = os.environ.get("MAX_QUEUE_SIZE", "20").strip()
 
 # Language used when no other can be determined. English has the widest voice
 # coverage across both engines.
@@ -549,15 +557,22 @@ def _sapi5_voice_for_language(language: str, engine) -> str | None:
 # sapi5 engine (offline)
 # --------------------------------------------------------------------------
 def _init_sapi5():
-    """Creates the pyttsx3 engine. The voice is set per utterance by language."""
+    """Creates the pyttsx3 engine. The voice is set per utterance by language.
+
+    Anything the dependencies print while being imported is redirected to
+    stderr. On a stdio MCP server stdout carries the JSON-RPC stream, so a stray
+    print from a transitive dependency would corrupt the protocol handshake.
+    """
     global _sapi5_engine
     with _lock:
         if _sapi5_engine is not None:
             return _sapi5_engine
 
-        import pyttsx3
+        with contextlib.redirect_stdout(sys.stderr):
+            import pyttsx3
 
-        engine = pyttsx3.init()
+            engine = pyttsx3.init()
+
         _sapi5_engine = engine
         return engine
 
@@ -578,6 +593,40 @@ def _apply_sapi5_voice(engine, language: str) -> None:
     if target != _current_sapi5_voice:
         engine.setProperty("voice", target)
         _current_sapi5_voice = target
+
+
+def _validate_voice_name() -> str:
+    """Checks VOICE_NAME against the live catalog.
+
+    Returns an empty string when the voice is usable, or a human readable
+    reason why it is not. edge-tts also validates the name, but only once the
+    audio has already been queued and a network round trip has been paid, which
+    turns a typo into a cryptic late failure.
+    """
+    if not VOICE_NAME:
+        return ""
+
+    catalog = _load_edge_catalog()
+    if not catalog:
+        # Catalog unavailable (no network). Let edge-tts decide later.
+        return ""
+
+    if VOICE_NAME in catalog:
+        return ""
+
+    base = VOICE_NAME.split("-")[0].lower()
+    suggestions = [
+        name
+        for name, info in catalog.items()
+        if info.get("Locale", "").split("-")[0].lower() == base
+    ]
+    hint = ""
+    if suggestions:
+        hint = " Voices available for that language: " + ", ".join(sorted(suggestions)[:6])
+    return (
+        f"VOICE_NAME '{VOICE_NAME}' does not exist in the edge-tts catalog."
+        f"{hint}"
+    )
 
 
 def _speak_sapi5(text: str) -> None:
@@ -663,6 +712,26 @@ def speak_summary(text: str) -> str:
     cleaned = " ".join(text.split()).strip()
     if not cleaned:
         return "Nothing was played: the summary was empty."
+
+    if ENGINE == "edge":
+        problem = _validate_voice_name()
+        if problem:
+            return f"Nothing was played: {problem}"
+
+    try:
+        max_queue = int(MAX_QUEUE_SIZE)
+    except ValueError:
+        logger.warning("Invalid MAX_QUEUE_SIZE: %s", MAX_QUEUE_SIZE)
+        max_queue = 20
+
+    if max_queue > 0 and _queue.qsize() >= max_queue:
+        logger.warning(
+            "Queue is full (%d pending); rejecting the request", max_queue
+        )
+        return (
+            f"Nothing was played: {max_queue} summaries are already queued. "
+            f"Wait for the queue to drain before sending more."
+        )
 
     words = cleaned.split()
     truncated = False

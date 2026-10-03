@@ -113,6 +113,7 @@ Everything is controlled through environment variables.
 | `VOICE_VOLUME` | `100` | `100` | Volume |
 | `VOICE_PLAYER` | path or name | auto-detected | Forced MP3 player |
 | `MAX_SUMMARY_WORDS` | integer | `400` | Safety cap on words per summary |
+| `MAX_QUEUE_SIZE` | integer | `20` | Maximum summaries waiting to be spoken |
 
 `VOICE_RATE` and `VOICE_VOLUME` accept both an absolute notation (the SAPI5
 scale, where 100 is normal) and a relative one (`+10%`, `-15%`). The server
@@ -469,6 +470,55 @@ Always write in the first person, without reading out literal code.
 If the user asks to speak another language, use another voice, or a male or
 female voice, call `set_language` or `set_gender`. The language defaults to the
 system one, so it does not need configuring.
+
+## Privacy and security
+
+This server is meant to run locally on your own machine, started by your MCP
+client as a child process. It opens no ports and listens on nothing.
+
+### What leaves your machine with the edge engine
+
+**The `edge` engine sends the summary text to Microsoft's servers** to render
+the audio. Only the text of the summary is sent, never your code, but keep in
+mind that a summary can mention file names, function names or error messages
+that you would rather keep private.
+
+If that matters for your setup, use the `sapi5` engine instead: it is fully
+offline and nothing ever leaves the machine.
+
+| Engine | Network | Audio quality |
+| --- | --- | --- |
+| `edge` | Summary text sent to Microsoft | High |
+| `sapi5` | Nothing leaves the machine | Basic, few voices |
+
+### Hardening already in place
+
+- **No shell.** The external audio player is invoked with an argument list, never
+  with `shell=True`. `VOICE_PLAYER` must resolve to a real executable through
+  `shutil.which`.
+- **stdout is never used for logging.** On a stdio MCP server stdout carries the
+  JSON-RPC stream, so a stray `print` from a dependency would corrupt the
+  protocol. Anything printed while the synthesizer is imported is redirected to
+  stderr.
+- **Voice names are validated against the live catalog** before anything is
+  queued, so a typo in `VOICE_NAME` fails immediately with a helpful message
+  instead of after a wasted network round trip.
+- **The queue is bounded** by `MAX_QUEUE_SIZE`. Without a cap, a client calling
+  `speak_summary` faster than playback could grow the queue without limit and
+  exhaust memory. Requests over the cap are rejected, not silently dropped.
+- **No dynamic code execution.** There is no `eval`, `exec`, `pickle`, or
+  `os.system` anywhere in the source.
+
+### Known limitations
+
+- **Voice and language are process-global.** `set_language` and `set_gender`
+  change the state of the whole server, so if two MCP sessions talk to the same
+  server process, one can change the voice for the other. This does not matter
+  for the intended single-user local setup, but it is not per-session isolation.
+- **`VOICE_PLAYER` executes a program.** That is its purpose, and it is only
+  read from your own configuration, but do not build it from untrusted input.
+- **`langdetect` accuracy.** Covered in detail in
+  [Automatic language detection](#automatic-language-detection).
 
 ## Implementation notes
 
