@@ -1,17 +1,21 @@
 # Servidor MCP de Resumen por Voz
 
 Un servidor [MCP](https://modelcontextprotocol.io/) local que lee en voz alta un
-resumen breve de las acciones que un asistente de IA acaba de realizar en el
-código. Pensado como capa de accesibilidad: el usuario oye qué ha hecho el
-agente sin necesidad de leer la respuesta completa.
+resumen de las acciones que un asistente de IA acaba de realizar en el código.
+Pensado como capa de accesibilidad: el usuario oye qué ha hecho el agente sin
+necesidad de leer la respuesta completa.
 
 Funciona con dos motores de síntesis, incluido un motor offline.
 
 ## Que hace
 
 Expone una herramienta MCP, `reproducir_resumen_voz`, que el asistente invoca
-tras modificar código, crear archivos o ejecutar comandos, pasando un resumen
-de 10 a 15 palabras en primera persona.
+tras modificar código, crear archivos o ejecutar comandos.
+
+La longitud del resumen la decide el asistente según cuánto trabajo haya
+hecho: una frase corta para un cambio puntual, o un resumen más desarrollado
+cuando la tarea ha sido grande o ha tenido varios pasos. Ver
+[Controlar la longitud del resumen](#controlar-la-longitud-del-resumen).
 
 La reproducción es asíncrona: la herramienta encola el texto y devuelve el
 control de inmediato, de modo que la locución nunca bloquea al asistente.
@@ -106,6 +110,7 @@ Todo se controla por variables de entorno.
 | `VOICE_RATE` | `100`, `110`, `-15%` | `100` | Velocidad |
 | `VOICE_VOLUME` | `100` | `100` | Volumen |
 | `VOICE_PLAYER` | ruta o nombre | autodetectado | Reproductor de MP3 forzado |
+| `MAX_SUMMARY_WORDS` | entero | `400` | Tope de seguridad de palabras por resumen |
 
 `VOICE_RATE` y `VOICE_VOLUME` aceptan notación absoluta (escala SAPI5, donde
 100 es el valor normal) y relativa (`+10%`, `-15%`). El servidor traduce
@@ -264,13 +269,80 @@ los argumentos y las variables de entorno.
 
 ### `reproducir_resumen_voz(texto)`
 
-Reproduce el texto en los altavoces del sistema. Pensada para resúmenes de 10
-a 15 palabras en primera persona.
+Reproduce el texto en los altavoces del sistema. La longitud es libre: el
+asistente envía un resumen corto o desarrollado según la magnitud del trabajo.
+Si el texto supera el tope de seguridad, se recorta y la respuesta incluye un
+aviso.
 
 ### `listar_voces()`
 
 Muestra las voces disponibles y cuál está activa. Útil para elegir
 `VOICE_NAME`.
+
+## Controlar la longitud del resumen
+
+La longitud **no la impone el servidor**: la decide el asistente en función de
+cuánto ha hecho. Hay dos niveles de control, y conviene entender la diferencia.
+
+### 1. La longitud que elige el asistente (recomendado)
+
+El asistente decide el tamaño según la tarea. Esto se consigue con la instrucción
+que le das a tu asistente, y es lo que conviene usar la mayor parte del tiempo,
+porque se adapta solo al trabajo.
+
+Un ejemplo de instrucción equilibrada:
+
+```markdown
+Al llamar a `reproducir_resumen_voz`, ajusta la longitud del resumen a la
+magnitud del trabajo realizado:
+
+- Cambio puntual o pequeño: una frase corta, de 10 a 20 palabras.
+- Tarea media o varios archivos: dos o tres frases, de 30 a 60 palabras.
+- Tarea grande o proyecto largo: un resumen de 80 a 150 palabras que repase
+  las principales acciones realizadas.
+
+Escribe siempre en primera persona, sin narrar código literal.
+```
+
+Si prefieres un tono más conversacional, sube los números. Si lo prefieres
+conciso, bájalos. No hay un valor correcto único: depende de la duración de las
+tareas con las que trabajas y de si lees también la respuesta completa.
+
+### 2. El tope de seguridad del servidor
+
+`MAX_SUMMARY_WORDS` no es una recomendación de longitud, sino un **freno de
+emergencia**. Sirve para que un `texto` desmedido no provoque una locución de
+varios minutos. Si se supera, el servidor recorta el resumen y lo avisa en la
+respuesta.
+
+```json
+"environment": { "MAX_SUMMARY_WORDS": "400" }
+```
+
+| Valor | Aproximación | Cuándo usarlo |
+| --- | --- | --- |
+| `0` | Sin recorte | Solo si quieres permitir locuciones ilimitadas |
+| `150` | ~1 minuto | Prefieres resúmenes cortos incluso en tareas grandes |
+| `400` | ~2-3 minutos | Valor por defecto, equilibrado |
+| `800` | ~5 minutos | Trabajos muy largos y no te molesta esperar |
+
+Una voz neuronal en español habla aproximadamente **2,5 palabras por segundo**,
+así que 100 palabras son unos 40 segundos. Las frases cortas y las pausas
+importan más para la comprensión que el recuento exacto.
+
+Si necesitas más detalle del que permite un resumen largo, la mejor opción es
+**dividir la tarea en varias llamadas** en lugar de subir el tope: así el
+usuario oye cada fase en el momento en que ocurre, en lugar de un bloque largo
+al final.
+
+### 3. Ajustar la velocidad de lectura
+
+Si el resumen te parece demasiado lento, ajusta la velocidad en lugar de la
+longitud:
+
+```json
+"environment": { "VOICE_RATE": "120" }  // 20% más rápido
+```
 
 ## Integrar la regla de comportamiento
 
@@ -284,9 +356,14 @@ Tienes disponible la herramienta MCP `voice-summary` con la función
 `reproducir_resumen_voz`. Es OBLIGATORIO usarla inmediatamente después de
 terminar de modificar código, crear archivos o ejecutar comandos.
 
-Al llamarla, pásale un resumen extremadamente conciso (máximo 10 a 15 palabras)
-en primera persona sobre lo que acabas de hacer, sin narrar código literal.
-Ejemplo: "He actualizado el endpoint de login y corregido las dependencias".
+Al llamarla, ajusta la longitud del resumen a la magnitud del trabajo:
+
+- Cambio puntual o pequeño: una frase corta, de 10 a 20 palabras.
+- Tarea media o varios archivos: dos o tres frases, de 30 a 60 palabras.
+- Tarea grande o proyecto largo: un resumen de 80 a 150 palabras que repase
+  las principales acciones realizadas.
+
+Escribe en primera persona, sin narrar código literal.
 ```
 
 ## Notas de implementacion

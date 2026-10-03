@@ -10,6 +10,12 @@ variables de entorno:
     VOICE_RATE   = velocidad, 100 es normal, o relativa ("+10%", "-15%")
     VOICE_VOLUME = volumen, 100 es normal
 
+    MAX_SUMMARY_WORDS = tope de seguridad de palabras por resumen (400)
+
+La longitud del resumen no la fija el servidor: la decide el asistente segun
+cuanto trabajo haya realizado. MAX_SUMMARY_WORDS solo evita locuciones
+accidentales de varios minutos.
+
 Motores:
 - sapi5: pyttsx3 sobre el sintetizador nativo del sistema. Offline y gratuito.
   En Windows usa SAPI5; en Linux, NSSpeech; en macOS, NSSS.
@@ -52,6 +58,12 @@ VOICE_VOLUME = os.environ.get("VOICE_VOLUME", "100").strip()
 
 # Reproductor de MP3 forzado por el usuario. Si se vacia, se autodetecta.
 VOICE_PLAYER = os.environ.get("VOICE_PLAYER", "").strip()
+
+# Tope de seguridad de palabras por resumen. No es una recomendacion de
+# longitud: el resumen lo decide el asistente segun la cantidad de trabajo que
+# haya hecho. Este limite solo evita locuciones accidentales de varios minutos
+# por un `texto` desmedido. Por defecto 400 palabras, unos 2-3 minutos.
+MAX_SUMMARY_WORDS = os.environ.get("MAX_SUMMARY_WORDS", "400").strip()
 
 # Voces por defecto segun motor.
 DEFAULT_SAPI5_VOICE = "es-es"  # se busca por fragmento de id o nombre
@@ -241,16 +253,42 @@ _hilo.start()
 def reproducir_resumen_voz(texto: str) -> str:
     """
     Reproduce un resumen en voz alta a traves de los altavoces del sistema.
-    Llama a esta herramienta con un resumen muy breve (maximo 10-15 palabras)
-    de la accion o tarea que acabas de realizar, en primera persona y sin
-    narrar codigo literal.
+
+    Ajusta la longitud del resumen a la cantidad de trabajo realizado: una frase
+    corta para un cambio puntual, y un resumen mas desarrollado cuando la tarea
+    ha sido grande o ha tenido varios pasos. No narres codigo literal ni
+    detalles que no aporten valor; escribe en primera persona.
+
+    Si el resumen supera el tope de seguridad (MAX_SUMMARY_WORDS, 400 por
+    defecto) se recorta automaticamente.
     """
     limpio = " ".join(texto.split()).strip()
     if not limpio:
         return "No se reprodujo nada: el resumen estaba vacio."
 
+    palabras = limpio.split()
+    recortado = False
+    try:
+        tope = int(MAX_SUMMARY_WORDS)
+    except ValueError:
+        logger.warning("MAX_SUMMARY_WORDS invalido: %s", MAX_SUMMARY_WORDS)
+        tope = 400
+
+    if tope > 0 and len(palabras) > tope:
+        limpio = " ".join(palabras[:tope]).rstrip(" ,;:.-")
+        recortado = True
+        logger.warning(
+            "Resumen recortado a %d palabras (envio %d)", tope, len(palabras)
+        )
+
+    respuesta = f"Reproduciendo resumen con exito: {limpio}"
+    if recortado:
+        respuesta += (
+            f" [Aviso: se recorto a {tope} palabras por seguridad. Divide el "
+            f"trabajo en varias llamadas si necesitas mas detalle.]"
+        )
     _cola.put(limpio)
-    return f"Reproduciendo resumen con exito: {limpio}"
+    return respuesta
 
 
 @mcp.tool()
