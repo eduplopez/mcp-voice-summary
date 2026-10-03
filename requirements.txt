@@ -1,26 +1,26 @@
-# Dependencias del servidor MCP de resumen por voz.
+# Dependencies for the MCP voice summary server.
 #
-# mcp >=2.0: a partir de la version 2.0, FastMCP paso a llamarse MCPServer.
-# edge-tts: voces neuronales de Azure (motor edge, requiere internet).
+# mcp >=2.0: from version 2.0 onwards, FastMCP was renamed to MCPServer.
+# edge-tts: Azure neural voices (edge engine, requires internet).
+# langdetect: language detection, only used if you set VOICE_LANGUAGE=auto.
+#             Optional: without it the server still works and just logs a
+#             warning when auto detection is requested.
 #
-# El motor sapi5 es opcional. Solo hace falta si quieres voz offline:
+# The sapi5 engine is also optional. You only need it for offline speech:
 #
 #   Windows: pip install pyttsx3 pywin32 comtypes
-#   Linux:   pip install pyttsx3  y ademas el motor del sistema:
+#   Linux:   pip install pyttsx3  plus the system engine:
 #            sudo apt install espeak-ng libespeak-ng1
 #   macOS:   pip install pyttsx3
 #
-# Por eso pyttsx3 no se instala por defecto: asi el motor edge funciona en
-# cualquier plataforma sin dependencias del sistema.
+# pyttsx3 is therefore not installed by default: the edge engine does not need
+# it, which keeps the project cross-platform with no system dependencies.
 
 mcp>=2.0,<3
 edge-tts>=7.0
-
-# Deteccion de idioma, solo usada si pones VOICE_LANGUAGE=auto. Es opcional:
-# si no esta instalada, el servidor funciona igual y avisa por log.
 langdetect>=1.0.9
 
-# Motor sapi5 opcional. Descomenta si lo vas a usar:
+# Optional sapi5 engine. Uncomment if you plan to use it:
 # pyttsx3>=2.90
 # pywin32>=306; sys_platform == "win32"
 # comtypes>=1.2; sys_platform == "win32"

@@ -1,34 +1,35 @@
-# Servidor MCP de Resumen por Voz
+# MCP Voice Summary Server
 
-Un servidor [MCP](https://modelcontextprotocol.io/) local que lee en voz alta un
-resumen de las acciones que un asistente de IA acaba de realizar en el código.
-Pensado como capa de accesibilidad: el usuario oye qué ha hecho el agente sin
-necesidad de leer la respuesta completa.
+A local [MCP](https://modelcontextprotocol.io/) server that reads out loud a
+summary of the actions an AI assistant just performed on your code. Built as an
+accessibility layer: you hear what the agent did without having to read the
+full response.
 
-Funciona con dos motores de síntesis, incluido un motor offline.
+Supports two synthesis engines, including an offline one. Speaks in the user's
+language automatically, with female and male voices.
 
-## Que hace
+## What it does
 
-Expone una herramienta MCP, `reproducir_resumen_voz`, que el asistente invoca
-tras modificar código, crear archivos o ejecutar comandos.
+Exposes an MCP tool, `speak_summary`, which the assistant calls after
+modifying code, creating files or running commands.
 
-La longitud del resumen la decide el asistente según cuánto trabajo haya
-hecho: una frase corta para un cambio puntual, o un resumen más desarrollado
-cuando la tarea ha sido grande o ha tenido varios pasos. Ver
-[Controlar la longitud del resumen](#controlar-la-longitud-del-resumen).
+The summary length is decided by the assistant based on how much work it did: a
+short sentence for a small change, or a fuller summary when the task was large
+or had several steps. See
+[Controlling the summary length](#controlling-the-summary-length).
 
-La reproducción es asíncrona: la herramienta encola el texto y devuelve el
-control de inmediato, de modo que la locución nunca bloquea al asistente.
+Playback is asynchronous: the tool queues the text and returns immediately, so
+speaking never blocks the assistant.
 
-## Requisitos
+## Requirements
 
-- Python 3.10 o superior.
-- Windows, Linux o macOS.
+- Python 3.10 or newer.
+- Windows, Linux or macOS.
 
-Solo el motor `sapi5` necesita una dependencia del sistema (el sintetizador
-nativo). El motor `edge` no necesita nada más que Python.
+Only the `sapi5` engine needs a system dependency (the native synthesizer).
+The `edge` engine needs nothing beyond Python.
 
-## Instalacion
+## Installation
 
 ```sh
 git clone https://github.com/eduplopez/mcp-voice-summary.git
@@ -37,193 +38,158 @@ cd mcp-voice-summary
 python -m venv .venv
 ```
 
-Activa el entorno virtual:
+Activate the virtual environment:
 
 ```sh
 # Windows
 .venv\Scripts\activate
-# Linux y macOS
+# Linux and macOS
 source .venv/bin/activate
 ```
 
-Instala las dependencias:
+Install the dependencies:
 
 ```sh
 pip install -r requirements.txt
 ```
 
-Comprueba que arranca:
+Check that it starts:
 
 ```sh
 python server.py
 ```
 
-El servidor habla por stdio, asi que no veras nada en la consola. Eso es
-correcto: cualquier texto que imprima en stdout romperia el protocolo. Ctrl+C
-para salir.
+The server speaks over stdio, so you will see nothing in the console. That is
+correct: anything printed to stdout would break the protocol. Ctrl+C to stop.
 
-### Dependencias del sistema por motor
+### System dependencies per engine
 
-`requirements.txt` instala solo lo necesario para el motor `edge`, que es
-multiplataforma y no depende del sistema. Si quieres usar `sapi5`, instala
-ademas `pyttsx3` y el sintetizador correspondiente:
+`requirements.txt` installs only what the `edge` engine needs, which is
+cross-platform and has no system dependency. If you want to use `sapi5`,
+install `pyttsx3` and the matching system synthesizer:
 
-| Sistema | Sintetizador | Instalacion |
+| System | Synthesizer | Installation |
 | --- | --- | --- |
 | Windows | SAPI5 | `pip install pyttsx3 pywin32 comtypes` |
-| Linux | NSSpeech | `pip install pyttsx3` y `sudo apt install espeak-ng libespeak-ng1` |
+| Linux | NSSpeech | `pip install pyttsx3` and `sudo apt install espeak-ng libespeak-ng1` |
 | macOS | NSSS | `pip install pyttsx3` |
 
-### Reproductores de audio
+### Audio players
 
-El motor `edge` genera un MP3 que hay que reproducir. El servidor busca un
-reproductor disponible y usa el primero que encuentre:
+The `edge` engine renders an MP3 that has to be played. The server looks for an
+available player and uses the first one it finds:
 
-| Sistema | Reproductor | Estado |
+| System | Player | Status |
 | --- | --- | --- |
-| Windows | MCI (integrado) | Siempre disponible |
-| macOS | `afplay` | Incluido de serie en macOS |
-| Linux | `ffplay`, `mpg123`, `cvlc` o `paplay` | Instala al menos uno |
+| Windows | MCI (built in) | Always available |
+| macOS | `afplay` | Ships with macOS |
+| Linux | `ffplay`, `mpg123`, `cvlc` or `paplay` | Install at least one |
 
-En Linux instala el reproductor que prefieras:
+On Linux, install whichever player you prefer:
 
 ```sh
-sudo apt install ffmpeg     # aporta ffplay
-# o
+sudo apt install ffmpeg     # provides ffplay
+# or
 sudo apt install mpg123
 ```
 
-Si tienes otro reproductor, indícalo con `VOICE_PLAYER`:
+If you have a different player, point the server at it with `VOICE_PLAYER`:
 
 ```json
-"environment": { "VOICE_PLAYER": "mi-reproductor" }
+"environment": { "VOICE_PLAYER": "my-player" }
 ```
 
-## Configuracion
+## Configuration
 
-Todo se controla por variables de entorno.
+Everything is controlled through environment variables.
 
-| Variable | Valores | Por defecto | Descripcion |
+| Variable | Values | Default | Description |
 | --- | --- | --- | --- |
-| `VOICE_ENGINE` | `edge` o `sapi5` | `sapi5` | Motor de síntesis |
-| `VOICE_NAME` | id o nombre de voz | ver abajo | Voz concreta |
-| `VOICE_RATE` | `100`, `110`, `-15%` | `100` | Velocidad |
-| `VOICE_VOLUME` | `100` | `100` | Volumen |
-| `VOICE_PLAYER` | ruta o nombre | autodetectado | Reproductor de MP3 forzado |
-| `VOICE_LANGUAGE` | `es`, `en`, `pt-BR`, `auto` | idioma del sistema | Idioma de la voz |
-| `VOICE_GENDER` | `female`, `male` | el del idioma | Género de la voz |
-| `MAX_SUMMARY_WORDS` | entero | `400` | Tope de seguridad de palabras por resumen |
+| `VOICE_ENGINE` | `edge` or `sapi5` | `sapi5` | Synthesis engine |
+| `VOICE_NAME` | voice id or name | auto | Exact voice, overrides everything |
+| `VOICE_LANGUAGE` | `es`, `en`, `pt-BR`, `auto` | system language | Voice language |
+| `VOICE_GENDER` | `female`, `male` | language default | Voice gender |
+| `VOICE_RATE` | `100`, `110`, `-15%` | `100` | Speed |
+| `VOICE_VOLUME` | `100` | `100` | Volume |
+| `VOICE_PLAYER` | path or name | auto-detected | Forced MP3 player |
+| `MAX_SUMMARY_WORDS` | integer | `400` | Safety cap on words per summary |
 
-`VOICE_RATE` y `VOICE_VOLUME` aceptan notación absoluta (escala SAPI5, donde
-100 es el valor normal) y relativa (`+10%`, `-15%`). El servidor traduce
-automáticamente al formato que exige cada motor.
+`VOICE_RATE` and `VOICE_VOLUME` accept both an absolute notation (the SAPI5
+scale, where 100 is normal) and a relative one (`+10%`, `-15%`). The server
+translates automatically into the format each engine requires.
 
-Tras cambiar la configuración, reinicia el cliente MCP.
+After changing the configuration, restart the MCP client.
 
-## Motores de sintesis
+## Languages
 
-### edge (recomendado)
+**Nothing needs configuring for this to work in your language.** The server
+picks the voice on its own. The precedence is:
 
-Voces neuronales de Azure mediante `edge_tts`. Calidad muy superior a las voces
-nativas, a cambio de **requerir conexión a internet en cada locución**, porque
-el audio se genera en la nube.
+1. `VOICE_NAME`, if set: it always wins as a manual override.
+2. `set_language`, if the assistant called it during the session.
+3. `VOICE_LANGUAGE`, if set in the configuration.
+4. The operating system language.
+5. English, as a last resort.
 
-```json
-"environment": {
-  "VOICE_ENGINE": "edge",
-  "VOICE_NAME": "es-ES-AlvaroNeural"
-}
-```
+### Changing language and gender
 
-### sapi5
-
-`pyttsx3` sobre el sintetizador nativo del sistema. **Offline y sin latencia**,
-pero las voces disponibles son de calidad básica. Usa SAPI5 en Windows,
-NSSpeech en Linux y NSSS en macOS.
-
-```json
-"environment": {
-  "VOICE_ENGINE": "sapi5",
-  "VOICE_NAME": "es-es"
-}
-```
-
-El valor por defecto de `VOICE_NAME` en este motor es `es-es`, que busca una voz
-española por fragmento de identificador. En Windows eso es Helena; en Linux y
-macOS el nombre del motor nativo puede ser distinto, así que conviene usar
-`listar_voces` para ver qué hay instalado.
-
-## Idiomas
-
-**No hace falta configurar nada para que funcione en tu idioma.** El servidor
-elige la voz solo. La precedencia es:
-
-1. `VOICE_NAME` si está definido: gana siempre, es una anulación manual.
-2. `establecer_idioma`, si el asistente lo ha llamado durante la sesión.
-3. `VOICE_LANGUAGE`, si está definido en la configuración.
-4. El idioma del sistema operativo.
-5. Inglés, como último recurso.
-
-### Cambiar de idioma y género
-
-En la configuración, de forma permanente:
+Permanently, in the configuration:
 
 ```json
 "environment": { "VOICE_LANGUAGE": "fr", "VOICE_GENDER": "male" }
 ```
 
-O en caliente, sin editar nada. El usuario puede pedirlo en lenguaje natural y
-el asistente llama a la herramienta:
+Or at runtime, without editing anything. The user can ask in natural language
+and the assistant calls the tool:
 
 ```
-establecer_idioma("en")            -> Voz: en-US-AvaNeural (female)
-establecer_idioma("pt-BR", "male") -> Voz: pt-BR-AntonioNeural (male)
-establecer_idioma("")              -> vuelve al idioma del sistema
+set_language("en")            -> Voice: en-US-AvaNeural (female)
+set_language("pt-BR", "male")  -> Voice: pt-BR-AntonioNeural (male)
+set_language("")              -> back to the system language
 
-establecer_genero("male")          -> solo cambia el género
-establecer_genero("femenina")      -> mismo que "female"
-establecer_genero("")              -> vuelve al género por defecto del idioma
+set_gender("male")             -> change only the gender
+set_gender("f")                -> same as "female"
+set_gender("")                 -> back to the language default
 ```
 
-El género admite `female`/`male`, `f`/`m`, `femenina`/`masculina` y
-`mujer`/`hombre`. El cambio en caliente se aplica a las locuciones siguientes
-y se mantiene hasta que se reinicie el servidor o se llame de nuevo con otro
-valor.
+Gender accepts `female`/`male` and `f`/`m`. A runtime change applies to the
+following utterances and lasts until the server restarts or the tool is called
+again with a different value.
 
-> El género **solo funciona con el motor `edge`**. SAPI5 no expone el género de
-> sus voces, así que con el motor `sapi5` la herramienta lo avisa y no hace nada.
-> Para elegir género hay que usar voces neuronales.
+> Gender **only works with the `edge` engine**. SAPI5 does not expose the gender
+> of its voices, so with `sapi5` the tool says so instead of pretending. Picking
+> a gender requires neural voices.
 
-### Detección automática del idioma
+### Automatic language detection
 
-`VOICE_LANGUAGE=auto` hace que el servidor deduzca el idioma de cada resumen a
-partir de su texto.
+`VOICE_LANGUAGE=auto` makes the server infer the language from each summary's
+text.
 
-**Usa esta opción con precaución.** La detección de idioma no es fiable con
-textos cortos, y este es justo el caso de uso principal del proyecto.
-Medido con resúmenes reales:
+**Use this with caution.** Language detection is not reliable on short text,
+and short summaries are the main use case of this project. Measured with real
+summaries:
 
-| Texto | Idioma real | Idioma detectado |
+| Text | Actual language | Detected |
 | --- | --- | --- |
-| `"Hecho."` | español | **checo** (con 100 % de confianza) |
-| `"Listo"` | español | **alemán** |
-| `"Test 123"` | cualquiera | **francés** |
-| `"He actualizado el endpoint de login y corregido las dependencias"` | español | español |
+| `"Done."` | Spanish | **Czech** (with 100 % confidence) |
+| `"Listo"` | Spanish | **German** |
+| `"Test 123"` | anything | **French** |
+| `"I updated the login endpoint and fixed the dependencies"` | English | English |
 
-Los detectores devuelven una confianza alta incluso cuando se equivocan, así
-que no hay forma de filtrar los errores por probabilidad. En resumen: la
-detección automática acierta con frases largas y falla con las cortas. Para un
-idioma fijo, `VOICE_LANGUAGE` es siempre más fiable.
+Detectors return high confidence even when they are wrong, so the errors cannot
+be filtered out by probability. In short: detection works on long sentences and
+fails on short ones. For a fixed language, `VOICE_LANGUAGE` is always more
+reliable.
 
-Si `langdetect` no está instalado, el modo `auto` avisa por log y cae al
-inglés. El resto de modos funcionan sin esa dependencia.
+If `langdetect` is not installed, `auto` logs a warning and falls back to
+English. The other modes work without that dependency.
 
-### Cobertura
+### Coverage
 
-Con el motor `edge` hay **142 locales** disponibles en 322 voces. Los 34
-idiomas siguientes tienen **voces femenina y masculina** asignadas:
+The `edge` engine exposes **142 locales** across 322 voices. These 34 languages
+have both a **female and a male** voice assigned:
 
-| Idioma | Femenina | Masculina | Idioma | Femenina | Masculina |
+| Language | Female | Male | Language | Female | Male |
 | --- | --- | --- | --- | --- | --- |
 | `es` | Ximena | Álvaro | `da` | Christel | Jeppe |
 | `en` | Ava | Andrew | `fi` | Noora | Harri |
@@ -243,21 +209,21 @@ idiomas siguientes tienen **voces femenina y masculina** asignadas:
 | `vi` | HoaiMy | NamMinh | `id` | Gadis | Ardi |
 | `ms` | Yasmin | Osman | | | |
 
-(Nombres abreviados; los identificadores exactos llevan el sufijo `Neural` y se
-pueden ver con `listar_voces` o con `python -m edge_tts --list-voices`.)
+(Short names; the exact identifiers carry the `Neural` suffix and can be seen
+with `list_voices` or `python -m edge_tts --list-voices`.)
 
-De los 142 locales, **solo 2 tienen un único género**: los dialectos chinos
-`zh-CN-liaoning` y `zh-CN-shaanxi`. Si pides un género que no existe en el
-locale elegido, el servidor avisa por log y usa la voz disponible en lugar de
-quedarse mudo.
+Of the 142 locales, **only 2 have a single gender**: the Chinese dialects
+`zh-CN-liaoning` and `zh-CN-shaanxi`. If you ask for a gender that does not
+exist in the chosen locale, the server logs a warning and uses the available
+voice instead of going silent.
 
-Para un idioma **sin** voces asignadas el servidor sigue funcionando: busca
-automáticamente entre las 322 voces la primera del idioma y el género pedidos.
-Por ejemplo, para `sw` (suajili) elige `sw-KE-RafikiNeural`.
+Languages **without** curated voices still work: the server searches the 322
+voices for the first one matching the requested language and gender. For
+example, `sw` (Swahili) resolves to `sw-KE-RafikiNeural`.
 
-Y si pides una variante regional concreta, se respeta, también por género:
+If you request a specific regional variant it is respected, by gender too:
 
-| Pides | Femenina | Masculina |
+| You ask | Female | Male |
 | --- | --- | --- |
 | `en-GB` | `en-GB-LibbyNeural` | `en-GB-RyanNeural` |
 | `pt-PT` | `pt-PT-RaquelNeural` | `pt-PT-DuarteNeural` |
@@ -265,63 +231,62 @@ Y si pides una variante regional concreta, se respeta, también por género:
 | `zh-TW` | `zh-TW-HsiaoChenNeural` | `zh-TW-YunJheNeural` |
 | `fr-CA` | `fr-CA-SylvieNeural` | `fr-CA-ThierryNeural` |
 
-El motor `sapi5` solo puede usar las voces instaladas en el sistema, así que
-su cobertura de idiomas es la que traiga tu sistema operativo, y no permite
-elegir género. Windows viene con español e inglés; el resto requiere añadir
-voces.
+The `sapi5` engine can only use voices installed on the system, so its language
+coverage is whatever your operating system provides, and it cannot pick gender.
+Windows ships with Spanish and English; other languages require adding voices.
 
-## Voces
+## Voices
 
-### Voces neuronales (motor edge)
+### Neural voices (edge engine)
 
-Catálogo completo de las 322 voces:
+Full catalog of all 322 voices:
 
 ```sh
 python -m edge_tts --list-voices
 ```
 
-Voces de español disponibles (45 en total):
+The 45 Spanish voices include:
 
-| Voz | Acento |
+| Voice | Region |
 | --- | --- |
-| `es-ES-AlvaroNeural` | España, masculina |
-| `es-ES-ElviraNeural` | España, femenina |
-| `es-ES-XimenaNeural` | España, femenina |
-| `es-MX-DaliaNeural` | México, femenina |
-| `es-MX-JorgeNeural` | México, masculina |
-| `es-US-PalomaNeural` | Estados Unidos, femenina |
+| `es-ES-AlvaroNeural` | Spain, male |
+| `es-ES-XimenaNeural` | Spain, female |
+| `es-ES-ElviraNeural` | Spain, female |
+| `es-MX-DaliaNeural` | Mexico, female |
+| `es-MX-JorgeNeural` | Mexico, male |
+| `es-US-PalomaNeural` | United States, female |
 
-### Voces nativas de Windows (motor sapi5)
+### Native Windows voices (sapi5 engine)
 
-De serie solo se ven tres voces muy básicas. Windows trae instaladas voces
-mejoradas, como **Microsoft Laura** y **Microsoft Pablo**, pero las registra
-bajo la rama `Speech_OneCore` del registro, que SAPI5 no lee.
+Out of the box only three very basic voices are visible. Windows already ships
+better ones, such as **Microsoft Laura** and **Microsoft Pablo**, but registers
+them under the registry key `Speech_OneCore`, which SAPI5 does not read.
 
-`registrar_voces_onecore.ps1` copia esas claves a la rama que SAPI5 sí consulta.
-Ejecútalo **una sola vez** desde PowerShell como administrador:
+`register_voices_onecore.ps1` copies those keys into the branch SAPI5 does
+read. Run it **once** from a PowerShell prompt as administrator:
 
 ```sh
-powershell -Command "Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File .\registrar_voces_onecore.ps1'"
+powershell -Command "Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File .\register_voices_onecore.ps1'"
 ```
 
-Es una copia de solo lectura: no borra ni sobrescribe ninguna voz existente, y
-omite las claves que ya estén presentes. Después reinicia el cliente MCP y
-llama a `listar_voces` para verlas. A partir de ahí quedan disponibles offline
-como `Laura` y `Pablo`.
+It is a read-only copy: no existing voice is deleted or overwritten, and keys
+that already exist are skipped. Then restart the MCP client and call
+`list_voices` to see them. From that point they are available offline as
+`Laura` and `Pablo`.
 
-## Integracion en clientes MCP
+## Integration with MCP clients
 
 ### OpenCode
 
-Añádelo globalmente para usarlo en todos tus proyectos:
+Add it globally to use it in every project:
 
 ```sh
-opencode mcp add voice-summary -- "C:\ruta\mcp-voice-summary\.venv\Scripts\python.exe" "C:\ruta\mcp-voice-summary\server.py"
+opencode mcp add voice-summary -- "C:\path\mcp-voice-summary\.venv\Scripts\python.exe" "C:\path\mcp-voice-summary\server.py"
 ```
 
-Comprueba la conexión con `opencode mcp list`.
+Check the connection with `opencode mcp list`.
 
-Para fijar motor y voz, edita `~/.config/opencode/opencode.json`:
+To pin engine, voice and language, edit `~/.config/opencode/opencode.json`:
 
 ```jsonc
 {
@@ -331,12 +296,13 @@ Para fijar motor y voz, edita `~/.config/opencode/opencode.json`:
       "voice-summary": {
         "type": "local",
         "command": [
-          "C:\\ruta\\mcp-voice-summary\\.venv\\Scripts\\python.exe",
-          "C:\\ruta\\mcp-voice-summary\\server.py"
+          "C:\\path\\mcp-voice-summary\\.venv\\Scripts\\python.exe",
+          "C:\\path\\mcp-voice-summary\\server.py"
         ],
         "environment": {
           "VOICE_ENGINE": "edge",
-          "VOICE_NAME": "es-ES-AlvaroNeural"
+          "VOICE_LANGUAGE": "en",
+          "VOICE_RATE": "120"
         }
       }
     }
@@ -344,19 +310,24 @@ Para fijar motor y voz, edita `~/.config/opencode/opencode.json`:
 }
 ```
 
+Note: setting `VOICE_NAME` pins one exact voice and disables automatic
+language and gender selection. To keep those working, use `VOICE_LANGUAGE` and
+`VOICE_GENDER` instead.
+
 ### Claude Desktop
 
-`claude_desktop_config.json`, en `%APPDATA%\Claude\`:
+`claude_desktop_config.json`, in `%APPDATA%\Claude\`:
 
 ```json
 {
   "mcpServers": {
     "voice-summary": {
-      "command": "C:\\ruta\\mcp-voice-summary\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\ruta\\mcp-voice-summary\\server.py"],
+      "command": "C:\\path\\mcp-voice-summary\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\path\\mcp-voice-summary\\server.py"],
       "env": {
         "VOICE_ENGINE": "edge",
-        "VOICE_NAME": "es-ES-AlvaroNeural"
+        "VOICE_LANGUAGE": "en",
+        "VOICE_RATE": "120"
       }
     }
   }
@@ -365,199 +336,193 @@ Para fijar motor y voz, edita `~/.config/opencode/opencode.json`:
 
 ### Cursor
 
-`.cursor/mcp.json` en el proyecto:
+`.cursor/mcp.json` in the project:
 
 ```json
 {
   "mcpServers": {
     "voice-summary": {
-      "command": "C:\\ruta\\mcp-voice-summary\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\ruta\\mcp-voice-summary\\server.py"],
-      "env": { "VOICE_ENGINE": "edge", "VOICE_NAME": "es-ES-AlvaroNeural" }
+      "command": "C:\\path\\mcp-voice-summary\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\path\\mcp-voice-summary\\server.py"],
+      "env": { "VOICE_ENGINE": "edge", "VOICE_LANGUAGE": "en" }
     }
   }
 }
 ```
 
-### Cualquier otro cliente
+### Any other client
 
-Es un servidor MCP por stdio estándar, así que basta con declarar el comando,
-los argumentos y las variables de entorno.
+It is a standard stdio MCP server, so declaring the command, the arguments and
+the environment variables is enough.
 
-## Herramientas
+## Tools
 
-### `reproducir_resumen_voz(texto)`
+### `speak_summary(text)`
 
-Reproduce el texto en los altavoces del sistema. La longitud es libre: el
-asistente envía un resumen corto o desarrollado según la magnitud del trabajo.
-Si el texto supera el tope de seguridad, se recorta y la respuesta incluye un
-aviso.
+Reads the text out loud through the system speakers. The length is free: the
+assistant sends a short or a detailed summary depending on the size of the work.
+If the text exceeds the safety cap, it is truncated and the response includes a
+notice.
 
-### `listar_voces()`
+### `list_voices()`
 
-Muestra qué idioma y qué voz están en uso ahora mismo, y las voces instaladas
-en el sistema.
+Shows which language and voice are in use right now, plus the voices installed
+on the system.
 
-### `establecer_idioma(idioma, genero="")`
+### `set_language(language, gender="")`
 
-Fija el idioma y, opcionalmente, el género de la voz sin editar la
-configuración. Acepta un código ISO 639-1 (`es`, `en`, `fr`), una variante
-regional (`pt-BR`, `en-GB`), `auto` para detectar el idioma de cada resumen, o
-una cadena vacía para volver al idioma del sistema.
+Sets the language and, optionally, the gender without editing the
+configuration. Accepts an ISO 639-1 code (`es`, `en`, `fr`), a regional variant
+(`pt-BR`, `en-GB`), `auto` to detect the language of each summary, or an empty
+string to go back to the system language.
 
-### `establecer_genero(genero)`
+### `set_gender(gender)`
 
-Cambia solo el género de la voz, manteniendo el idioma. Acepta
-`female`/`male`, `f`/`m`, `femenina`/`masculina` y `mujer`/`hombre`, o una
-cadena vacía para volver al valor por defecto.
+Changes only the voice gender, keeping the language. Accepts `female`/`male`
+and `f`/`m`, or an empty string to go back to the default.
 
-## Controlar la longitud del resumen
+## Controlling the summary length
 
-La longitud **no la impone el servidor**: la decide el asistente en función de
-cuánto ha hecho. Hay dos niveles de control, y conviene entender la diferencia.
+The length **is not imposed by the server**: the assistant decides it based on
+how much it did. There are two levels of control, and it is worth understanding
+the difference.
 
-### 1. La longitud que elige el asistente (recomendado)
+### 1. The length the assistant picks (recommended)
 
-El asistente decide el tamaño según la tarea. Esto se consigue con la instrucción
-que le das a tu asistente, y es lo que conviene usar la mayor parte del tiempo,
-porque se adapta solo al trabajo.
+The assistant chooses the size based on the task. You do this through the
+instruction you give your assistant, and it is what to use most of the time,
+because it adapts to the work on its own.
 
-Un ejemplo de instrucción equilibrada:
+A balanced example:
 
 ```markdown
-Al llamar a `reproducir_resumen_voz`, ajusta la longitud del resumen a la
-magnitud del trabajo realizado:
+When calling `speak_summary`, match the summary length to the size of the work:
 
-- Cambio puntual o pequeño: una frase corta, de 10 a 20 palabras.
-- Tarea media o varios archivos: dos o tres frases, de 30 a 60 palabras.
-- Tarea grande o proyecto largo: un resumen de 80 a 150 palabras que repase
-  las principales acciones realizadas.
+- Small or single change: one short sentence, 10 to 20 words.
+- Medium task or several files: two or three sentences, 30 to 60 words.
+- Large task or long project: a summary of 80 to 150 words that walks through
+  the main actions performed.
 
-Escribe siempre en primera persona, sin narrar código literal.
+Always write in the first person, without reading out literal code.
 ```
 
-Si prefieres un tono más conversacional, sube los números. Si lo prefieres
-conciso, bájalos. No hay un valor correcto único: depende de la duración de las
-tareas con las que trabajas y de si lees también la respuesta completa.
+Prefer a more conversational tone? Raise the numbers. Prefer concise? Lower
+them. There is no single correct value: it depends on how long your tasks are
+and on whether you also read the full response.
 
-### 2. El tope de seguridad del servidor
+### 2. The server safety cap
 
-`MAX_SUMMARY_WORDS` no es una recomendación de longitud, sino un **freno de
-emergencia**. Sirve para que un `texto` desmedido no provoque una locución de
-varios minutos. Si se supera, el servidor recorta el resumen y lo avisa en la
-respuesta.
+`MAX_SUMMARY_WORDS` is not a length recommendation, it is an **emergency
+brake**. It stops an oversized `text` from turning into a multi-minute
+announcement. If it is exceeded, the server truncates the summary and says so
+in the response.
 
 ```json
 "environment": { "MAX_SUMMARY_WORDS": "400" }
 ```
 
-| Valor | Aproximación | Cuándo usarlo |
+| Value | Roughly | When to use it |
 | --- | --- | --- |
-| `0` | Sin recorte | Solo si quieres permitir locuciones ilimitadas |
-| `150` | ~1 minuto | Prefieres resúmenes cortos incluso en tareas grandes |
-| `400` | ~2-3 minutos | Valor por defecto, equilibrado |
-| `800` | ~5 minutos | Trabajos muy largos y no te molesta esperar |
+| `0` | No truncation | Only if you want unlimited announcements |
+| `150` | ~1 minute | You prefer short summaries even on big tasks |
+| `400` | ~2-3 minutes | Default, balanced |
+| `800` | ~5 minutes | Very long work, and waiting does not bother you |
 
-Una voz neuronal en español habla aproximadamente **2,5 palabras por segundo**,
-así que 100 palabras son unos 40 segundos. Las frases cortas y las pausas
-importan más para la comprensión que el recuento exacto.
+A neural voice in English speaks roughly **2.5 words per second**, so 100 words
+is about 40 seconds. Short sentences and pauses matter more for comprehension
+than the exact word count.
 
-Si necesitas más detalle del que permite un resumen largo, la mejor opción es
-**dividir la tarea en varias llamadas** en lugar de subir el tope: así el
-usuario oye cada fase en el momento en que ocurre, en lugar de un bloque largo
-al final.
+If you need more detail than a long summary allows, the best option is to
+**split the task into several calls** instead of raising the cap: that way you
+hear each phase as it happens, rather than one long block at the end.
 
-### 3. Ajustar la velocidad de lectura
+### 3. Adjusting the reading speed
 
-Si el resumen te parece demasiado lento, ajusta la velocidad en lugar de la
-longitud:
+If the summary feels too slow, adjust the speed rather than the length:
 
 ```json
-"environment": { "VOICE_RATE": "120" }  // 20% más rápido
+"environment": { "VOICE_RATE": "120" }  // 20% faster
 ```
 
-## Integrar la regla de comportamiento
+## Wiring up the behaviour rule
 
-Para que el asistente la use de forma automática, añade esta instrucción a las
-reglas de tu cliente. En OpenCode va en `~/.config/opencode/AGENTS.md`:
+To make the assistant use this automatically, add this instruction to your
+client's rules. In OpenCode it goes in `~/.config/opencode/AGENTS.md`:
 
 ```markdown
-## Regla de accesibilidad de voz
+## Voice accessibility rule
 
-Tienes disponible la herramienta MCP `voice-summary` con la función
-`reproducir_resumen_voz`. Es OBLIGATORIO usarla inmediatamente después de
-terminar de modificar código, crear archivos o ejecutar comandos.
+You have access to the `voice-summary` MCP server with the `speak_summary`
+tool. You MUST use it right after you finish modifying code, creating files or
+running commands.
 
-Al llamarla, ajusta la longitud del resumen a la magnitud del trabajo:
+When calling it, match the summary length to the size of the work:
 
-- Cambio puntual o pequeño: una frase corta, de 10 a 20 palabras.
-- Tarea media o varios archivos: dos o tres frases, de 30 a 60 palabras.
-- Tarea grande o proyecto largo: un resumen de 80 a 150 palabras que repase
-  las principales acciones realizadas.
+- Small or single change: one short sentence, 10 to 20 words.
+- Medium task or several files: two or three sentences, 30 to 60 words.
+- Large task or long project: a summary of 80 to 150 words that walks through
+  the main actions performed.
 
-Escribe en primera persona, sin narrar código literal.
+Always write in the first person, without reading out literal code.
 ```
 
-Si el usuario pide hablar en otro idioma, usar otra voz, o una voz masculina o
-femenina, llama a `establecer_idioma` o `establecer_genero`. El idioma se
-ajusta solo al del sistema, así que no hace falta configurarlo.
+If the user asks to speak another language, use another voice, or a male or
+female voice, call `set_language` or `set_gender`. The language defaults to the
+system one, so it does not need configuring.
 
-## Notas de implementacion
+## Implementation notes
 
-Detalles que no son evidentes y que conviene conocer si vas a modificarlo:
+Details that are not obvious and worth knowing before modifying this:
 
-- **`pyttsx3` se bloquea indefinidamente si el engine se crea en un hilo y se
-  usa en otro.** COM es *apartment-threaded*. Por eso el motor se inicializa de
-  forma perezosa y se usa siempre desde el mismo hilo trabajador.
-- Un único hilo trabajador consume una `queue`, de modo que dos locuciones
-  consecutivas nunca se pisan ni se cortan.
-- `runAndWait` de SAPI5 puede retornar antes de que termine la locución, así que
-  hay una espera activa con `isBusy()`. El motor edge usa MCI con espera
-  bloqueante, por lo que su timing es exacto.
-- El hilo trabajador es *daemon*: la voz nunca impide cerrar el proceso.
-- Cualquier fallo de audio se captura y se registra en el log. El servidor MCP
-  nunca se cae por no poder hablar.
-- Los imports de `pyttsx3`, `edge_tts` y `langdetect` son perezosos, para que el
-  servidor arranque aunque falte alguno de ellos.
-- La selección de voz por idioma tiene tres niveles de reserva: voz curada del
-  idioma, luego cualquier voz de su variante regional preferida, luego
-  cualquier voz de ese idioma. Por eso un idioma sin voz curada sigue
-  funcionando.
-- La reproducción del MP3 es una capa aparte: MCI en Windows y un reproductor
-  externo en Linux y macOS, con lista de candidatos y `VOICE_PLAYER` como
-  Override manual.
+- **`pyttsx3` blocks forever if the engine is created in one thread and used in
+  another.** COM is apartment-threaded. That is why the engine is initialized
+  lazily and always used from the same worker thread.
+- A single worker thread consumes a `queue`, so two consecutive utterances never
+  overlap or cut each other off.
+- SAPI5's `runAndWait` can return before the utterance finishes, so there is an
+  active wait using `isBusy()`. The edge engine uses a blocking MCI playback,
+  so its timing is exact.
+- The worker thread is a daemon: speech never prevents process shutdown.
+- The `pyttsx3`, `edge_tts` and `langdetect` imports are lazy, so the server
+  starts even if any of them is missing.
+- Voice selection by language has three fallback levels: the curated voice for
+  the language, then any voice of its preferred regional variant, then any
+  voice of that language. That is why a language without a curated voice still
+  works.
+- Any audio failure is caught and logged. The MCP server never goes down
+  because it could not speak.
 
-## Problemas frecuentes
+## Troubleshooting
 
-**No se oye nada.** Comprueba que el volumen del sistema está activo y que la
-salida por defecto es correcta. En el motor `edge`, verifica que hay
-conexión a internet.
+**No sound.** Check that the system volume is on and that the default output
+device is correct. With the `edge` engine, verify there is an internet
+connection.
 
-**`No se encontro ningun reproductor de audio`.** Solo afecta a Linux y macOS
-con el motor `edge`. Instala `ffmpeg`, `mpg123` o `vlc`, o define
-`VOICE_PLAYER` con tu reproductor. En Windows no ocurre, porque se usa MCI.
+**The voice gets cut off or messages overlap.** Check that only one instance of
+the MCP server is running.
 
-**En Linux el motor `sapi5` no encuentra voces.** Instala el sintetizador del
-sistema: `sudo apt install espeak-ng libespeak-ng1`. Ten en cuenta que las
-voces de espeak son muy inferiores a las de edge-tts.
+**`No audio player was found`.** Only affects Linux and macOS with the `edge`
+engine. Install `ffmpeg`, `mpg123` or `vlc`, or set `VOICE_PLAYER`. This does
+not happen on Windows, which uses MCI.
 
-**La voz suena entrecortada o se pisan mensajes.** Comprueba que solo hay una
-instancia del servidor MCP corriendo.
+**The `sapi5` engine finds no voices on Linux.** Install the system
+synthesizer: `sudo apt install espeak-ng libespeak-ng1`. Bear in mind that
+espeak voices are far inferior to edge-tts.
 
-**`ImportError: No module named mcp.server.fastmcp`.** Instala `mcp>=2.0`. En la
-versión 2 `FastMCP` pasó a llamarse `MCPServer`. Si necesitas el API antiguo,
-fija `mcp<2`.
+**`ImportError: No module named mcp.server.fastmcp`.** Install `mcp>=2.0`. In
+version 2 `FastMCP` was renamed to `MCPServer`. If you need the old API, pin
+`mcp<2`.
 
-**`No se pudo reproducir el resumen` en el log.** El mensaje concreto aparece
-en el log del servidor. Las causas típicas son voz inexistente
-(`VOICE_NAME` mal escrito) o ausencia de red con el motor `edge`.
+**It speaks in an unexpected language.** If the text comes out with a strange
+accent, `VOICE_LANGUAGE=auto` most likely misdetected it. This is a known
+weakness of detection on short text: pin it with `set_language("fr")` or with
+`VOICE_LANGUAGE`. See the table of
+[detection failures](#automatic-language-detection).
 
-**Habla en un idioma que no es el del sistema.** Si el texto se reproduce con
-acento extraño, casi siempre es porque `VOICE_LANGUAGE=auto` ha detectado mal
-el idioma. Es un problema conocido de la detección con textos cortos: fíjalo
-con `establecer_idioma("fr")` o con `VOICE_LANGUAGE`. Consulta la tabla de
-[fallos de detección](#detección-automática-del-idioma).
+**`Could not play the summary` in the log.** The concrete message appears in the
+server log. Typical causes are a nonexistent voice (typo in `VOICE_NAME`) or no
+network with the `edge` engine.
 
-## Licencia
+## License
 
-MIT. Ver [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
