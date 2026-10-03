@@ -111,6 +111,7 @@ Todo se controla por variables de entorno.
 | `VOICE_VOLUME` | `100` | `100` | Volumen |
 | `VOICE_PLAYER` | ruta o nombre | autodetectado | Reproductor de MP3 forzado |
 | `VOICE_LANGUAGE` | `es`, `en`, `pt-BR`, `auto` | idioma del sistema | Idioma de la voz |
+| `VOICE_GENDER` | `female`, `male` | el del idioma | Género de la voz |
 | `MAX_SUMMARY_WORDS` | entero | `400` | Tope de seguridad de palabras por resumen |
 
 `VOICE_RATE` y `VOICE_VOLUME` aceptan notación absoluta (escala SAPI5, donde
@@ -163,25 +164,35 @@ elige la voz solo. La precedencia es:
 4. El idioma del sistema operativo.
 5. Inglés, como último recurso.
 
-### Cambiar de idioma
+### Cambiar de idioma y género
 
 En la configuración, de forma permanente:
 
 ```json
-"environment": { "VOICE_LANGUAGE": "fr" }
+"environment": { "VOICE_LANGUAGE": "fr", "VOICE_GENDER": "male" }
 ```
 
 O en caliente, sin editar nada. El usuario puede pedirlo en lenguaje natural y
 el asistente llama a la herramienta:
 
 ```
-establecer_idioma("en")      -> Idioma fijado a en. Voz seleccionada: en-US-AriaNeural.
-establecer_idioma("pt-BR")   -> Idioma fijado a pt-br. Voz seleccionada: pt-BR-FranciscaNeural.
-establecer_idioma("")        -> vuelve al idioma del sistema
+establecer_idioma("en")            -> Voz: en-US-AvaNeural (female)
+establecer_idioma("pt-BR", "male") -> Voz: pt-BR-AntonioNeural (male)
+establecer_idioma("")              -> vuelve al idioma del sistema
+
+establecer_genero("male")          -> solo cambia el género
+establecer_genero("femenina")      -> mismo que "female"
+establecer_genero("")              -> vuelve al género por defecto del idioma
 ```
 
-El cambio en caliente se aplica a las locuciones siguientes y se mantiene hasta
-que se reinicie el servidor o se llame de nuevo con otro valor.
+El género admite `female`/`male`, `f`/`m`, `femenina`/`masculina` y
+`mujer`/`hombre`. El cambio en caliente se aplica a las locuciones siguientes
+y se mantiene hasta que se reinicie el servidor o se llame de nuevo con otro
+valor.
+
+> El género **solo funciona con el motor `edge`**. SAPI5 no expone el género de
+> sus voces, así que con el motor `sapi5` la herramienta lo avisa y no hace nada.
+> Para elegir género hay que usar voces neuronales.
 
 ### Detección automática del idioma
 
@@ -210,47 +221,54 @@ inglés. El resto de modos funcionan sin esa dependencia.
 ### Cobertura
 
 Con el motor `edge` hay **142 locales** disponibles en 322 voces. Los 34
-idiomas siguientes tienen una voz curada, con la variante regional que se
-indica:
+idiomas siguientes tienen **voces femenina y masculina** asignadas:
 
-| Idioma | Voz por defecto | Idioma | Voz por defecto |
-| --- | --- | --- | --- |
-| `es` | `es-ES-ElviraNeural` | `da` | `da-DK-JeppeNeural` |
-| `en` | `en-US-AriaNeural` | `fi` | `fi-FI-NooraNeural` |
-| `fr` | `fr-FR-DeniseNeural` | `nl` | `nl-NL-MaartenNeural` |
-| `de` | `de-DE-KatjaNeural` | `pl` | `pl-PL-ZofiaNeural` |
-| `it` | `it-IT-ElsaNeural` | `ru` | `ru-RU-SvetlanaNeural` |
-| `pt` | `pt-BR-FranciscaNeural` | `uk` | `uk-UA-PolinaNeural` |
-| `ca` | `ca-ES-JoanaNeural` | `cs` | `cs-CZ-VlastaNeural` |
-| `gl` | `gl-ES-RoiNeural` | `sk` | `sk-SK-LukasNeural` |
-| `hu` | `hu-HU-TamasNeural` | `ro` | `ro-RO-EmilNeural` |
-| `bg` | `bg-BG-KalinaNeural` | `el` | `el-GR-NestorasNeural` |
-| `sv` | `sv-SE-SofieNeural` | `tr` | `tr-TR-AhmetNeural` |
-| `nb` | `nb-NO-PernilleNeural` | `ar` | `ar-EG-ShakirNeural` |
-| `ja` | `ja-JP-NanamiNeural` | `he` | `he-IL-HilaNeural` |
-| `ko` | `ko-KR-SunHiNeural` | `hi` | `hi-IN-SwaraNeural` |
-| `zh` | `zh-CN-XiaoxiaoNeural` | `th` | `th-TH-PremwadeeNeural` |
-| `vi` | `vi-VN-HoaiMyNeural` | `id` | `id-ID-GadisNeural` |
-| `ms` | `ms-MY-YasminNeural` | | |
+| Idioma | Femenina | Masculina | Idioma | Femenina | Masculina |
+| --- | --- | --- | --- | --- | --- |
+| `es` | Ximena | Álvaro | `da` | Christel | Jeppe |
+| `en` | Ava | Andrew | `fi` | Noora | Harri |
+| `fr` | Vivienne | Rémy | `nl` | Colette | Maarten |
+| `de` | Seraphina | Florian | `pl` | Zofia | Marek |
+| `it` | Elsa | Giuseppe | `ru` | Svetlana | Dmitry |
+| `pt` | Thalita | Antonio | `uk` | Polina | Ostap |
+| `ca` | Joana | Enric | `cs` | Vlasta | Antonín |
+| `gl` | Sabela | Roi | `sk` | Viktoria | Lukáš |
+| `hu` | Noémi | Tamás | `ro` | Alina | Emil |
+| `bg` | Kalina | Borislav | `el` | Athina | Nestoras |
+| `sv` | Sofie | Mattias | `tr` | Emel | Ahmet |
+| `nb` | Pernille | Finn | `ar` | Salma | Shakir |
+| `ja` | Nanami | Keita | `he` | Hila | Avri |
+| `ko` | Sun-Hi | Hyunsu | `hi` | Swara | Madhur |
+| `zh` | Xiaoxiao | Yunxian | `th` | Premwadee | Niwat |
+| `vi` | HoaiMy | NamMinh | `id` | Gadis | Ardi |
+| `ms` | Yasmin | Osman | | | |
 
-Para un idioma **sin** voz curada el servidor sigue funcionando: busca
-automáticamente cualquier voz disponible de ese idioma entre las 322. Por
-ejemplo, para `sw` (suajili) elige `sw-KE-RafikiNeural`.
+(Nombres abreviados; los identificadores exactos llevan el sufijo `Neural` y se
+pueden ver con `listar_voces` o con `python -m edge_tts --list-voices`.)
 
-Y si pides una variante regional concreta, se respeta:
+De los 142 locales, **solo 2 tienen un único género**: los dialectos chinos
+`zh-CN-liaoning` y `zh-CN-shaanxi`. Si pides un género que no existe en el
+locale elegido, el servidor avisa por log y usa la voz disponible en lugar de
+quedarse mudo.
 
-| Pides | Obtienes |
-| --- | --- |
-| `en-GB` | `en-GB-LibbyNeural` |
-| `en-AU` | `en-AU-WilliamMultilingualNeural` |
-| `pt-PT` | `pt-PT-DuarteNeural` |
-| `es-MX` | `es-MX-DaliaNeural` |
-| `zh-TW` | `zh-TW-HsiaoChenNeural` |
-| `fr-CA` | `fr-CA-ThierryNeural` |
+Para un idioma **sin** voces asignadas el servidor sigue funcionando: busca
+automáticamente entre las 322 voces la primera del idioma y el género pedidos.
+Por ejemplo, para `sw` (suajili) elige `sw-KE-RafikiNeural`.
+
+Y si pides una variante regional concreta, se respeta, también por género:
+
+| Pides | Femenina | Masculina |
+| --- | --- | --- |
+| `en-GB` | `en-GB-LibbyNeural` | `en-GB-RyanNeural` |
+| `pt-PT` | `pt-PT-RaquelNeural` | `pt-PT-DuarteNeural` |
+| `es-MX` | `es-MX-DaliaNeural` | `es-MX-JorgeNeural` |
+| `zh-TW` | `zh-TW-HsiaoChenNeural` | `zh-TW-YunJheNeural` |
+| `fr-CA` | `fr-CA-SylvieNeural` | `fr-CA-ThierryNeural` |
 
 El motor `sapi5` solo puede usar las voces instaladas en el sistema, así que
-su cobertura de idiomas es la que traiga tu sistema operativo. Windows viene
-con español e inglés; el resto requiere añadir voces.
+su cobertura de idiomas es la que traiga tu sistema operativo, y no permite
+elegir género. Windows viene con español e inglés; el resto requiere añadir
+voces.
 
 ## Voces
 
@@ -380,12 +398,18 @@ aviso.
 Muestra qué idioma y qué voz están en uso ahora mismo, y las voces instaladas
 en el sistema.
 
-### `establecer_idioma(idioma)`
+### `establecer_idioma(idioma, genero="")`
 
-Fija el idioma de la voz sin editar la configuración. Acepta un código ISO 639-1
-(`es`, `en`, `fr`), una variante regional (`pt-BR`, `en-GB`), `auto` para
-detectar el idioma de cada resumen, o una cadena vacía para volver al idioma
-del sistema.
+Fija el idioma y, opcionalmente, el género de la voz sin editar la
+configuración. Acepta un código ISO 639-1 (`es`, `en`, `fr`), una variante
+regional (`pt-BR`, `en-GB`), `auto` para detectar el idioma de cada resumen, o
+una cadena vacía para volver al idioma del sistema.
+
+### `establecer_genero(genero)`
+
+Cambia solo el género de la voz, manteniendo el idioma. Acepta
+`female`/`male`, `f`/`m`, `femenina`/`masculina` y `mujer`/`hombre`, o una
+cadena vacía para volver al valor por defecto.
 
 ## Controlar la longitud del resumen
 
@@ -473,6 +497,10 @@ Al llamarla, ajusta la longitud del resumen a la magnitud del trabajo:
 
 Escribe en primera persona, sin narrar código literal.
 ```
+
+Si el usuario pide hablar en otro idioma, usar otra voz, o una voz masculina o
+femenina, llama a `establecer_idioma` o `establecer_genero`. El idioma se
+ajusta solo al del sistema, así que no hace falta configurarlo.
 
 ## Notas de implementacion
 

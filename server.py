@@ -68,6 +68,11 @@ VOICE_PLAYER = os.environ.get("VOICE_PLAYER", "").strip()
 # establecer_idioma.
 VOICE_LANGUAGE = os.environ.get("VOICE_LANGUAGE", "").strip()
 
+# Genero de la voz. Valores: "" (el que tenga asignado el idioma), "female" o
+# "male". Acepta tambien "f"/"m", "femenina"/"masculina" y "mujer"/"hombre".
+# Solo aplica al motor edge: SAPI5 no expone el genero de sus voces.
+VOICE_GENDER = os.environ.get("VOICE_GENDER", "").strip().lower()
+
 # Tope de seguridad de palabras por resumen. No es una recomendacion de
 # longitud: el resumen lo decide el asistente segun la cantidad de trabajo que
 # haya hecho. Este limite solo evita locuciones accidentales de varios minutos
@@ -189,44 +194,64 @@ def _reproducir_mp3(ruta: str) -> None:
 # --------------------------------------------------------------------------
 # Seleccion de idioma y de voz
 # --------------------------------------------------------------------------
-# Voz neuronal preferida por idioma. Los nombres se han verificado contra el
-# catalogo real de edge-tts; si alguno dejara de existir, la busqueda cae
-# automaticamente a cualquier otra voz del mismo idioma.
-VOZ_POR_IDIOMA: dict[str, str] = {
-    "es": "es-ES-ElviraNeural",
-    "en": "en-US-AriaNeural",
-    "fr": "fr-FR-DeniseNeural",
-    "de": "de-DE-KatjaNeural",
-    "it": "it-IT-ElsaNeural",
-    "pt": "pt-BR-FranciscaNeural",
-    "ca": "ca-ES-JoanaNeural",
-    "gl": "gl-ES-CeldeNeural",
-    "ru": "ru-RU-SvetlanaNeural",
-    "uk": "uk-UA-PolinaNeural",
-    "pl": "pl-PL-ZofiaNeural",
-    "cs": "cs-CZ-VlastaNeural",
-    "sk": "sk-SK-LukasNeural",
-    "hu": "hu-HU-TamasNeural",
-    "ro": "ro-RO-EmilNeural",
-    "bg": "bg-BG-KalinaNeural",
-    "el": "el-GR-NestorasNeural",
-    "sv": "sv-SE-SofieNeural",
-    "da": "da-DK-JeppeNeural",
-    "nb": "nb-NO-PernilleNeural",
-    "fi": "fi-FI-NooraNeural",
-    "nl": "nl-NL-MaartenNeural",
-    "tr": "tr-TR-AhmetNeural",
-    "ar": "ar-EG-ShakirNeural",
-    "he": "he-IL-HilaNeural",
-    "hi": "hi-IN-SwaraNeural",
-    "ja": "ja-JP-NanamiNeural",
-    "ko": "ko-KR-SunHiNeural",
-    "zh": "zh-CN-XiaoxiaoNeural",
-    "th": "th-TH-PremwadeeNeural",
-    "vi": "vi-VN-HoaiMyNeural",
-    "id": "id-ID-GadisNeural",
-    "ms": "ms-MY-YasminNeural",
+# Voz neuronal preferida por idioma y genero: (femenina, masculina). Los
+# nombres se han verificado contra el catalogo real de edge-tts; si alguno
+# dejara de existir, la busqueda cae automaticamente a cualquier otra voz del
+# mismo idioma y genero.
+VOZES_POR_IDIOMA: dict[str, tuple[str, str]] = {
+    "es": ("es-ES-XimenaNeural", "es-ES-AlvaroNeural"),
+    "en": ("en-US-AvaNeural", "en-US-AndrewNeural"),
+    "fr": ("fr-FR-VivienneMultilingualNeural", "fr-FR-RemyMultilingualNeural"),
+    "de": ("de-DE-SeraphinaMultilingualNeural", "de-DE-FlorianMultilingualNeural"),
+    "it": ("it-IT-ElsaNeural", "it-IT-GiuseppeNeural"),
+    "pt": ("pt-BR-ThalitaMultilingualNeural", "pt-BR-AntonioNeural"),
+    "ca": ("ca-ES-JoanaNeural", "ca-ES-EnricNeural"),
+    "gl": ("gl-ES-SabelaNeural", "gl-ES-RoiNeural"),
+    "ru": ("ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural"),
+    "uk": ("uk-UA-PolinaNeural", "uk-UA-OstapNeural"),
+    "pl": ("pl-PL-ZofiaNeural", "pl-PL-MarekNeural"),
+    "cs": ("cs-CZ-VlastaNeural", "cs-CZ-AntoninNeural"),
+    "sk": ("sk-SK-ViktoriaNeural", "sk-SK-LukasNeural"),
+    "hu": ("hu-HU-NoemiNeural", "hu-HU-TamasNeural"),
+    "ro": ("ro-RO-AlinaNeural", "ro-RO-EmilNeural"),
+    "bg": ("bg-BG-KalinaNeural", "bg-BG-BorislavNeural"),
+    "el": ("el-GR-AthinaNeural", "el-GR-NestorasNeural"),
+    "sv": ("sv-SE-SofieNeural", "sv-SE-MattiasNeural"),
+    "da": ("da-DK-ChristelNeural", "da-DK-JeppeNeural"),
+    "nb": ("nb-NO-PernilleNeural", "nb-NO-FinnNeural"),
+    "fi": ("fi-FI-NooraNeural", "fi-FI-HarriNeural"),
+    "nl": ("nl-NL-ColetteNeural", "nl-NL-MaartenNeural"),
+    "tr": ("tr-TR-EmelNeural", "tr-TR-AhmetNeural"),
+    "ar": ("ar-EG-SalmaNeural", "ar-EG-ShakirNeural"),
+    "he": ("he-IL-HilaNeural", "he-IL-AvriNeural"),
+    "hi": ("hi-IN-SwaraNeural", "hi-IN-MadhurNeural"),
+    "ja": ("ja-JP-NanamiNeural", "ja-JP-KeitaNeural"),
+    "ko": ("ko-KR-SunHiNeural", "ko-KR-HyunsuMultilingualNeural"),
+    "zh": ("zh-CN-XiaoxiaoNeural", "zh-CN-YunjianNeural"),
+    "th": ("th-TH-PremwadeeNeural", "th-TH-NiwatNeural"),
+    "vi": ("vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"),
+    "id": ("id-ID-GadisNeural", "id-ID-ArdiNeural"),
+    "ms": ("ms-MY-YasminNeural", "ms-MY-OsmanNeural"),
 }
+
+# Sinonimos aceptados para indicar genero de voz.
+GENEROS = {
+    "f": "female",
+    "female": "female",
+    "femenina": "female",
+    "mujer": "female",
+    "m": "male",
+    "male": "male",
+    "masculina": "male",
+    "masculino": "male",
+    "hombre": "male",
+}
+
+# Indice de genero dentro de las tuplas de VOZES_POR_IDIOMA.
+GENERO_INDICE = {"female": 0, "male": 1}
+
+# Genero forzado en caliente. Vacio significa "usar el curado del idioma".
+_genero_forzado: str = ""
 
 # Variante regional preferida por idioma, para el caso de que la voz curada
 # no exista y haya que elegir otra del mismo idioma.
@@ -273,6 +298,29 @@ IDIOMA_ESPECIAL = {
     "ko": "coreano",
     "he": "hebreo",
 }
+
+
+def _normalizar_genero(valor: str) -> str:
+    """Normaliza un alias de genero. Vacio si no se reconoce."""
+    return GENEROS.get((valor or "").strip().lower(), "")
+
+
+def _genero_efectivo(idioma: str) -> str:
+    """Devuelve el genero de voz que corresponde a un idioma dado.
+
+    Resultado: "female", "male" o "" si el idioma no tiene genero asignado y
+    no se ha forzado ninguno.
+    """
+    if _genero_forzado:
+        return _genero_forzado
+    configurado = _normalizar_genero(VOICE_GENDER)
+    if configurado:
+        return configurado
+
+    base = (idioma or "").lower().split("-")[0]
+    # Si el idioma tiene par de voces asignado, se usa la femenina por
+    # defecto salvo que el usuario indique lo contrario.
+    return "female" if base in VOZES_POR_IDIOMA else ""
 
 
 def _nombre_idioma(idioma: str) -> str:
@@ -364,8 +412,30 @@ def _resolver_idioma(texto: str) -> str:
     return _idioma_del_sistema() or DEFAULT_LANGUAGE
 
 
-def _voz_edge_para_idioma(idioma: str) -> str:
-    """Elige una voz de edge-tts para el idioma pedido.
+def _elegir_segun_genero(
+    catalogo: dict[str, dict], candidatos: list[str], genero: str
+) -> str | None:
+    """De una lista de voces, devuelve la primera del genero pedido.
+
+    Si ninguna coincide con el genero, devuelve la primera de la lista para no
+    dejar al usuario sin voz.
+    """
+    if not candidatos:
+        return None
+    if genero:
+        for nombre in candidatos:
+            if catalogo.get(nombre, {}).get("Gender", "").lower() == genero:
+                return nombre
+        logger.info(
+            "Ninguna voz disponible de '%s' es %s; se usa la primera.",
+            ",".join(candidatos[:1]),
+            genero,
+        )
+    return candidatos[0]
+
+
+def _voz_edge_para_idioma(idioma: str, genero: str = "") -> str:
+    """Elige una voz de edge-tts para el idioma y el genero pedidos.
 
     Si se pide una variante regional explicita ("pt-PT", "en-GB") se respeta
     esa region; si solo se pide el idioma ("pt", "en") se usa la variante
@@ -376,41 +446,54 @@ def _voz_edge_para_idioma(idioma: str) -> str:
 
     clave = idioma.lower()
     base, _, region = clave.partition("-")
+    genero = genero or _genero_efectivo(clave)
 
     catalogo = _cargar_catalogo_edge()
     if not catalogo:
         # Sin catalogo solo se puede usar la voz curada, si la hay.
-        return VOZ_POR_IDIOMA.get(base, DEFAULT_EDGE_VOICE)
+        par = VOZES_POR_IDIOMA.get(base)
+        if par:
+            return par[GENERO_INDICE.get(genero, 0)]
+        return DEFAULT_EDGE_VOICE
 
-    curada = VOZ_POR_IDIOMA.get(base)
-    por_locale = {
-        nombre: info.get("Locale", "") for nombre, info in catalogo.items()
-    }
+    por_locale: dict[str, list[str]] = {}
+    for nombre, info in catalogo.items():
+        por_locale.setdefault(info.get("Locale", "").lower(), []).append(nombre)
 
-    if region:
-        # 1. Voz curada del idioma, pero solo si es de la region pedida.
-        if curada and por_locale.get(curada, "").lower() == clave:
+    par = VOZES_POR_IDIOMA.get(base)
+    indice = GENERO_INDICE.get(genero, 0)
+    curada = par[indice] if par else None
+
+    # 1. Voz curada del idioma, si su variante regional es la pedida.
+    if region and curada and curada in catalogo:
+        if catalogo[curada].get("Locale", "").lower() == clave:
             return curada
-        # 2. Cualquier voz de esa region exacta.
-        for nombre, locale in por_locale.items():
-            if locale.lower() == clave:
-                return nombre
 
-    # 3. Voz curada del idioma.
+    # 2. Voz del genero pedido dentro de la region pedida.
+    if region:
+        elegida = _elegir_segun_genero(catalogo, por_locale.get(clave, []), genero)
+        if elegida:
+            return elegida
+
+    # 3. Voz curada del idioma con el genero pedido.
     if curada and curada in catalogo:
         return curada
 
     # 4. Variante regional preferida del idioma.
-    regional = LOCALE_POR_IDIOMA.get(base)
-    if regional:
-        for nombre, locale in por_locale.items():
-            if locale.lower() == regional.lower():
-                return nombre
+    regional = (LOCALE_POR_IDIOMA.get(base) or "").lower()
+    elegida = _elegir_segun_genero(catalogo, por_locale.get(regional, []), genero)
+    if elegida:
+        return elegida
 
     # 5. Cualquier voz del idioma, en cualquier variante regional.
-    for nombre, locale in por_locale.items():
-        if locale.split("-")[0].lower() == base:
-            return nombre
+    todos = [
+        nombre
+        for nombre, info in catalogo.items()
+        if info.get("Locale", "").split("-")[0].lower() == base
+    ]
+    elegida = _elegir_segun_genero(catalogo, todos, genero)
+    if elegida:
+        return elegida
 
     logger.warning(
         "No hay voces de edge-tts para '%s'; se usa '%s'.", idioma, DEFAULT_EDGE_VOICE
@@ -611,20 +694,32 @@ def listar_voces() -> str:
     import sys
 
     idioma = _resolver_idioma("")
-    forzado = "forzado en caliente" if _idioma_forzado is not None else VOICE_LANGUAGE or "idioma del sistema"
+    origen_idioma = (
+        "forzado en caliente"
+        if _idioma_forzado is not None
+        else VOICE_LANGUAGE or "idioma del sistema"
+    )
     cabecera = [
         f"Motor: {ENGINE}",
-        f"Idioma: {_nombre_idioma(idioma)} (origen: {forzado})",
+        f"Idioma: {_nombre_idioma(idioma)} (origen: {origen_idioma})",
     ]
 
     if ENGINE == "edge":
-        voz = _voz_edge_para_idioma(idioma)
-        cabecera.append(f"Voz para ese idioma: {voz}")
+        genero = _genero_efectivo(idioma) or "sin preferencia"
+        cabecera.append(f"Genero: {genero}")
+        cabecera.append(f"Voz en uso: {_voz_edge_para_idioma(idioma, genero)}")
         if VOICE_NAME:
             cabecera.append(f"VOICE_NAME sobrescribe la eleccion automatica: {VOICE_NAME}")
         cabecera.append("")
+        cabecera.append("Opciones de genero para el idioma actual:")
+        for etiqueta, valor in (("femenina", "female"), ("masculina", "male")):
+            cabecera.append(
+                f"- {etiqueta}: {_voz_edge_para_idioma(idioma, valor)}"
+            )
+        cabecera.append("")
         cabecera.append(
-            "Idiomas con voz curada: " + ", ".join(sorted(VOZ_POR_IDIOMA))
+            "Idiomas con voz curada (femenina y masculina): "
+            + ", ".join(sorted(VOZES_POR_IDIOMA))
         )
         cabecera.append(
             "Para el catalogo completo de voces neuronales ejecuta: "
@@ -660,23 +755,38 @@ def listar_voces() -> str:
 
 
 @mcp.tool()
-def establecer_idioma(idioma: str) -> str:
+def establecer_idioma(idioma: str, genero: str = "") -> str:
     """
-    Fija el idioma de la voz para las siguientes locuciones, sin necesidad de
-    editar la configuracion. Llama a esta herramienta cuando el usuario pida
-    hablar en otro idioma, por ejemplo "habla en ingles" o "cambia a frances".
+    Fija el idioma y, opcionalmente, el genero de la voz para las siguientes
+    locuciones, sin editar la configuracion. Llama a esta herramienta cuando el
+    usuario pida hablar en otro idioma o con otra voz, por ejemplo "habla en
+    ingles", "cambia a frances" o "usa una voz masculina".
 
     Acepta un codigo ISO 639-1 ("es", "en", "fr") o con variante regional
-    ("pt-BR", "en-GB"). Usa "auto" para detectar el idioma de cada resumen a
-    partir del texto, o "auto" con "system" para volver al idioma del sistema.
+    ("pt-BR", "en-GB"). El genero admite "female"/"male", "f"/"m",
+    "femenina"/"masculina" y "mujer"/"hombre". Usa "" para volver al idioma del
+    sistema, o "auto" para deducir el idioma del texto de cada resumen.
     """
-    global _idioma_forzado
+    global _idioma_forzado, _genero_forzado
+
+    valor_genero = _normalizar_genero(genero)
+    if genero.strip() and not valor_genero:
+        return (
+            f"Genero no reconocido: {genero}. Usa 'female' o 'male' "
+            f"(tambien 'femenina'/'masculina' o 'mujer'/'hombre')."
+        )
+    if valor_genero:
+        _genero_forzado = valor_genero
 
     valor = (idioma or "").strip()
     if not valor:
         _idioma_forzado = None
+        genero_texto = (
+            f", genero {valor_genero}" if valor_genero else ", genero sin forzar"
+        )
         return (
-            f"Idioma restablecido al del sistema: {_idioma_del_sistema() or DEFAULT_LANGUAGE}."
+            f"Idioma restablecido al del sistema: "
+            f"{_nombre_idioma(_idioma_del_sistema() or DEFAULT_LANGUAGE)}{genero_texto}."
         )
 
     if valor.lower() == "auto":
@@ -695,12 +805,53 @@ def establecer_idioma(idioma: str) -> str:
     _idioma_forzado = valor
 
     if ENGINE == "edge":
-        voz = _voz_edge_para_idioma(valor.lower())
-        return f"Idioma fijado a {_nombre_idioma(valor)}. Voz seleccionada: {voz}."
+        genero_efectivo = valor_genero or _genero_efectivo(valor.lower())
+        voz = _voz_edge_para_idioma(valor.lower(), genero_efectivo)
+        return (
+            f"Idioma fijado a {_nombre_idioma(valor)}. "
+            f"Voz seleccionada: {voz} ({genero_efectivo})."
+        )
+    aviso = "" if valor_genero else " El genero no se aplica a sapi5."
     return (
         f"Idioma fijado a {_nombre_idioma(valor)}. En el motor sapi5 se usara la "
-        f"voz de ese idioma si esta instalada en el sistema."
+        f"voz de ese idioma si esta instalada en el sistema.{aviso}"
     )
+
+
+@mcp.tool()
+def establecer_genero(genero: str) -> str:
+    """
+    Cambia el genero de la voz sin tocar el idioma. Llama a esta herramienta
+    cuando el usuario pida una voz masculina o femenina, por ejemplo "usa voz
+    de hombre".
+
+    Acepta "female"/"male", "f"/"m", "femenina"/"masculina" y
+    "mujer"/"hombre". Usa "" para volver al genero por defecto del idioma.
+    """
+    global _genero_forzado
+
+    if not (genero or "").strip():
+        _genero_forzado = ""
+        return "Genero restablecido al valor por defecto del idioma."
+
+    valor = _normalizar_genero(genero)
+    if not valor:
+        return (
+            f"Genero no reconocido: {genero}. Usa 'female' o 'male' "
+            f"(tambien 'femenina'/'masculina' o 'mujer'/'hombre')."
+        )
+
+    _genero_forzado = valor
+    if ENGINE != "edge":
+        return (
+            f"Genero fijado a {valor}, pero el motor sapi5 no expone el genero de "
+            f"sus voces, asi que no se aplicara. Usa el motor edge para elegir voz "
+            f"por genero."
+        )
+
+    idioma = _resolver_idioma("")
+    voz = _voz_edge_para_idioma(idioma, valor)
+    return f"Genero fijado a {valor}. Voz para {_nombre_idioma(idioma)}: {voz}."
 
 
 if __name__ == "__main__":
