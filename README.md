@@ -110,6 +110,7 @@ Todo se controla por variables de entorno.
 | `VOICE_RATE` | `100`, `110`, `-15%` | `100` | Velocidad |
 | `VOICE_VOLUME` | `100` | `100` | Volumen |
 | `VOICE_PLAYER` | ruta o nombre | autodetectado | Reproductor de MP3 forzado |
+| `VOICE_LANGUAGE` | `es`, `en`, `pt-BR`, `auto` | idioma del sistema | Idioma de la voz |
 | `MAX_SUMMARY_WORDS` | entero | `400` | Tope de seguridad de palabras por resumen |
 
 `VOICE_RATE` y `VOICE_VOLUME` aceptan notación absoluta (escala SAPI5, donde
@@ -151,11 +152,117 @@ española por fragmento de identificador. En Windows eso es Helena; en Linux y
 macOS el nombre del motor nativo puede ser distinto, así que conviene usar
 `listar_voces` para ver qué hay instalado.
 
+## Idiomas
+
+**No hace falta configurar nada para que funcione en tu idioma.** El servidor
+elige la voz solo. La precedencia es:
+
+1. `VOICE_NAME` si está definido: gana siempre, es una anulación manual.
+2. `establecer_idioma`, si el asistente lo ha llamado durante la sesión.
+3. `VOICE_LANGUAGE`, si está definido en la configuración.
+4. El idioma del sistema operativo.
+5. Inglés, como último recurso.
+
+### Cambiar de idioma
+
+En la configuración, de forma permanente:
+
+```json
+"environment": { "VOICE_LANGUAGE": "fr" }
+```
+
+O en caliente, sin editar nada. El usuario puede pedirlo en lenguaje natural y
+el asistente llama a la herramienta:
+
+```
+establecer_idioma("en")      -> Idioma fijado a en. Voz seleccionada: en-US-AriaNeural.
+establecer_idioma("pt-BR")   -> Idioma fijado a pt-br. Voz seleccionada: pt-BR-FranciscaNeural.
+establecer_idioma("")        -> vuelve al idioma del sistema
+```
+
+El cambio en caliente se aplica a las locuciones siguientes y se mantiene hasta
+que se reinicie el servidor o se llame de nuevo con otro valor.
+
+### Detección automática del idioma
+
+`VOICE_LANGUAGE=auto` hace que el servidor deduzca el idioma de cada resumen a
+partir de su texto.
+
+**Usa esta opción con precaución.** La detección de idioma no es fiable con
+textos cortos, y este es justo el caso de uso principal del proyecto.
+Medido con resúmenes reales:
+
+| Texto | Idioma real | Idioma detectado |
+| --- | --- | --- |
+| `"Hecho."` | español | **checo** (con 100 % de confianza) |
+| `"Listo"` | español | **alemán** |
+| `"Test 123"` | cualquiera | **francés** |
+| `"He actualizado el endpoint de login y corregido las dependencias"` | español | español |
+
+Los detectores devuelven una confianza alta incluso cuando se equivocan, así
+que no hay forma de filtrar los errores por probabilidad. En resumen: la
+detección automática acierta con frases largas y falla con las cortas. Para un
+idioma fijo, `VOICE_LANGUAGE` es siempre más fiable.
+
+Si `langdetect` no está instalado, el modo `auto` avisa por log y cae al
+inglés. El resto de modos funcionan sin esa dependencia.
+
+### Cobertura
+
+Con el motor `edge` hay **142 locales** disponibles en 322 voces. Los 34
+idiomas siguientes tienen una voz curada, con la variante regional que se
+indica:
+
+| Idioma | Voz por defecto | Idioma | Voz por defecto |
+| --- | --- | --- | --- |
+| `es` | `es-ES-ElviraNeural` | `da` | `da-DK-JeppeNeural` |
+| `en` | `en-US-AriaNeural` | `fi` | `fi-FI-NooraNeural` |
+| `fr` | `fr-FR-DeniseNeural` | `nl` | `nl-NL-MaartenNeural` |
+| `de` | `de-DE-KatjaNeural` | `pl` | `pl-PL-ZofiaNeural` |
+| `it` | `it-IT-ElsaNeural` | `ru` | `ru-RU-SvetlanaNeural` |
+| `pt` | `pt-BR-FranciscaNeural` | `uk` | `uk-UA-PolinaNeural` |
+| `ca` | `ca-ES-JoanaNeural` | `cs` | `cs-CZ-VlastaNeural` |
+| `gl` | `gl-ES-RoiNeural` | `sk` | `sk-SK-LukasNeural` |
+| `hu` | `hu-HU-TamasNeural` | `ro` | `ro-RO-EmilNeural` |
+| `bg` | `bg-BG-KalinaNeural` | `el` | `el-GR-NestorasNeural` |
+| `sv` | `sv-SE-SofieNeural` | `tr` | `tr-TR-AhmetNeural` |
+| `nb` | `nb-NO-PernilleNeural` | `ar` | `ar-EG-ShakirNeural` |
+| `ja` | `ja-JP-NanamiNeural` | `he` | `he-IL-HilaNeural` |
+| `ko` | `ko-KR-SunHiNeural` | `hi` | `hi-IN-SwaraNeural` |
+| `zh` | `zh-CN-XiaoxiaoNeural` | `th` | `th-TH-PremwadeeNeural` |
+| `vi` | `vi-VN-HoaiMyNeural` | `id` | `id-ID-GadisNeural` |
+| `ms` | `ms-MY-YasminNeural` | | |
+
+Para un idioma **sin** voz curada el servidor sigue funcionando: busca
+automáticamente cualquier voz disponible de ese idioma entre las 322. Por
+ejemplo, para `sw` (suajili) elige `sw-KE-RafikiNeural`.
+
+Y si pides una variante regional concreta, se respeta:
+
+| Pides | Obtienes |
+| --- | --- |
+| `en-GB` | `en-GB-LibbyNeural` |
+| `en-AU` | `en-AU-WilliamMultilingualNeural` |
+| `pt-PT` | `pt-PT-DuarteNeural` |
+| `es-MX` | `es-MX-DaliaNeural` |
+| `zh-TW` | `zh-TW-HsiaoChenNeural` |
+| `fr-CA` | `fr-CA-ThierryNeural` |
+
+El motor `sapi5` solo puede usar las voces instaladas en el sistema, así que
+su cobertura de idiomas es la que traiga tu sistema operativo. Windows viene
+con español e inglés; el resto requiere añadir voces.
+
 ## Voces
 
 ### Voces neuronales (motor edge)
 
-45 voces en español disponibles. Recomendadas:
+Catálogo completo de las 322 voces:
+
+```sh
+python -m edge_tts --list-voices
+```
+
+Voces de español disponibles (45 en total):
 
 | Voz | Acento |
 | --- | --- |
@@ -165,12 +272,6 @@ macOS el nombre del motor nativo puede ser distinto, así que conviene usar
 | `es-MX-DaliaNeural` | México, femenina |
 | `es-MX-JorgeNeural` | México, masculina |
 | `es-US-PalomaNeural` | Estados Unidos, femenina |
-
-Catálogo completo, sin instalar nada más:
-
-```sh
-.venv\Scripts\python.exe -m edge_tts --list-voices
-```
 
 ### Voces nativas de Windows (motor sapi5)
 
@@ -276,8 +377,15 @@ aviso.
 
 ### `listar_voces()`
 
-Muestra las voces disponibles y cuál está activa. Útil para elegir
-`VOICE_NAME`.
+Muestra qué idioma y qué voz están en uso ahora mismo, y las voces instaladas
+en el sistema.
+
+### `establecer_idioma(idioma)`
+
+Fija el idioma de la voz sin editar la configuración. Acepta un código ISO 639-1
+(`es`, `en`, `fr`), una variante regional (`pt-BR`, `en-GB`), `auto` para
+detectar el idioma de cada resumen, o una cadena vacía para volver al idioma
+del sistema.
 
 ## Controlar la longitud del resumen
 
@@ -381,8 +489,12 @@ Detalles que no son evidentes y que conviene conocer si vas a modificarlo:
 - El hilo trabajador es *daemon*: la voz nunca impide cerrar el proceso.
 - Cualquier fallo de audio se captura y se registra en el log. El servidor MCP
   nunca se cae por no poder hablar.
-- Los imports de `pyttsx3` y `edge_tts` son perezosos, para que el servidor
-  arranque aunque falte uno de los dos motores.
+- Los imports de `pyttsx3`, `edge_tts` y `langdetect` son perezosos, para que el
+  servidor arranque aunque falte alguno de ellos.
+- La selección de voz por idioma tiene tres niveles de reserva: voz curada del
+  idioma, luego cualquier voz de su variante regional preferida, luego
+  cualquier voz de ese idioma. Por eso un idioma sin voz curada sigue
+  funcionando.
 - La reproducción del MP3 es una capa aparte: MCI en Windows y un reproductor
   externo en Linux y macOS, con lista de candidatos y `VOICE_PLAYER` como
   Override manual.
@@ -411,6 +523,12 @@ fija `mcp<2`.
 **`No se pudo reproducir el resumen` en el log.** El mensaje concreto aparece
 en el log del servidor. Las causas típicas son voz inexistente
 (`VOICE_NAME` mal escrito) o ausencia de red con el motor `edge`.
+
+**Habla en un idioma que no es el del sistema.** Si el texto se reproduce con
+acento extraño, casi siempre es porque `VOICE_LANGUAGE=auto` ha detectado mal
+el idioma. Es un problema conocido de la detección con textos cortos: fíjalo
+con `establecer_idioma("fr")` o con `VOICE_LANGUAGE`. Consulta la tabla de
+[fallos de detección](#detección-automática-del-idioma).
 
 ## Licencia
 

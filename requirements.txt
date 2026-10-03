@@ -16,6 +16,10 @@
 mcp>=2.0,<3
 edge-tts>=7.0
 
+# Deteccion de idioma, solo usada si pones VOICE_LANGUAGE=auto. Es opcional:
+# si no esta instalada, el servidor funciona igual y avisa por log.
+langdetect>=1.0.9
+
 # Motor sapi5 opcional. Descomenta si lo vas a usar:
 # pyttsx3>=2.90
 # pywin32>=306; sys_platform == "win32"
