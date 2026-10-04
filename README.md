@@ -55,6 +55,10 @@ With `uvx`, without installing anything:
 }
 ```
 
+This server is also listed in the [MCP Registry](https://registry.modelcontextprotocol.io)
+under `io.github.eduplopez/mcp-voice-summary`. The registry metadata lives in
+[`server.json`](server.json) in this repo.
+
 Then tell your assistant to use it, for example: *"After you finish a task, read
 a short summary out loud."*
 

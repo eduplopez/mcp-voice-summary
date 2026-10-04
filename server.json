@@ -1,0 +1,86 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.eduplopez/mcp-voice-summary",
+  "description": "Reads a summary out loud when an AI coding task finishes. Offline or neural voices.",
+  "repository": {
+    "url": "https://github.com/eduplopez/mcp-voice-summary",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/eduplopez/mcp-voice-summary",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "mcp-voice-summary",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeHint": "uvx",
+      "environmentVariables": [
+        {
+          "name": "VOICE_ENGINE",
+          "description": "Synthesis engine: 'edge' for Azure neural voices (needs internet), 'sapi5' for fully offline native speech.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "edge"
+        },
+        {
+          "name": "VOICE_LANGUAGE",
+          "description": "ISO 639-1 code such as 'es' or 'en', optionally with a region such as 'pt-BR'. 'auto' detects it per summary, which is unreliable on short text. Empty follows the system language.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "VOICE_GENDER",
+          "description": "'female' or 'male'. Requires the edge engine; sapi5 does not expose the gender of its voices.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "VOICE_RATE",
+          "description": "Reading speed. 100 is normal, 120 is faster, '-15%' is relative.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "100"
+        },
+        {
+          "name": "VOICE_VOLUME",
+          "description": "Volume, 0 to 100.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "100"
+        },
+        {
+          "name": "VOICE_MUTE",
+          "description": "Set to 1 to validate and queue summaries without playing anything. Useful in shared spaces.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "VOICE_MODE",
+          "description": "'full' speaks the sanitized summary, 'short' replaces it with a fixed generic message so no summary content reaches the speakers or the cloud engine.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "full"
+        }
+      ]
+    }
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "com.github": {
+        "serverDisplayName": "MCP Voice Summary",
+        "license": "MIT"
+      }
+    }
+  }
+}
