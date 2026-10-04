@@ -30,11 +30,17 @@ def main() -> int:
     check("tests", result.wasSuccessful(), f"{result.testsRun} run")
 
     print("\n2. Known vulnerabilities")
+    # Judge by exit code, not by grepping the output. pip-audit prints a bare
+    # table header when it cannot resolve every dependency, so a substring match
+    # reported a failure that was really a different, unrecognised message.
     proc = subprocess.run(
         [sys.executable, "-m", "pip_audit"], capture_output=True, text=True
     )
-    output = (proc.stdout + proc.stderr).lower()
-    check("pip-audit", "no known vulnerabilities" in output, output.strip()[:80])
+    detail = (proc.stdout + proc.stderr).strip().splitlines()
+    if proc.returncode == 0:
+        check("pip-audit", True, detail[-1][:80] if detail else "clean")
+    else:
+        check("pip-audit", False, " | ".join(detail[-6:])[:300])
 
     print("\n3. stdout is clean (MCP JSON-RPC lives there)")
     proc = subprocess.run(
