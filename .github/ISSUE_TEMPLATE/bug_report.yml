@@ -1,0 +1,78 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary-sample
+    attributes:
+      label: A summary that triggers it
+      description: >
+        The kind of summary text you sent, with anything sensitive removed.
+        This is the most useful part of the report.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options: [edge, sapi5]
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: Windows 11, macOS 15.1, Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: 3.12.4
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How you installed it
+      options: [pip install ., git clone, uvx, pipx, other]
+    validations:
+      required: true
+
+  - type: textarea
+    id: list-voices
+    attributes:
+      label: Output of the list_voices tool
+      description: >
+        Paste it as-is. It reports the engine, language, voice and counters,
+        and contains no summary text.
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant stderr
+      description: >
+        The server logs to stderr. Note that summary text is never written to
+        the log; you will see a word count and a short digest instead.
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant environment variables
+      description: Voice settings you changed, with secrets removed.
+      render: shell

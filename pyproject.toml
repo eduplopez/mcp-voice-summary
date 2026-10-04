@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-voice-summary"
+version = "0.1.0"
+description = "MCP server that reads task summaries out loud, offline or with neural voices"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Eduardo Pablo Lopez Sanchez" }]
+keywords = ["mcp", "tts", "voice", "accessibility", "llm", "text-to-speech"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# mcp must stay on 2.x: the server imports mcp.server.mcpserver, which only
+# exists from 2.0 onwards (FastMCP was renamed in that release).
+dependencies = [
+    "mcp>=2.0,<3",
+    "edge-tts>=7.0,<8",
+    "langdetect>=1.0.9,<2",
+]
+
+[project.optional-dependencies]
+# Offline speech via the operating system synthesizer. Kept out of the base
+# install because the edge engine does not need them and they are platform
+# specific.
+sapi5 = [
+    "pyttsx3>=2.90",
+    "pywin32>=306; sys_platform == 'win32'",
+    "comtypes>=1.2; sys_platform == 'win32'",
+]
+dev = [
+    "pip-audit>=2.7",
+    "build>=1.2",
+    "twine>=5.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/eduplopez/mcp-voice-summary"
+Repository = "https://github.com/eduplopez/mcp-voice-summary"
+Issues = "https://github.com/eduplopez/mcp-voice-summary/issues"
+Changelog = "https://github.com/eduplopez/mcp-voice-summary/blob/main/CHANGELOG.md"
+
+[project.scripts]
+mcp-voice-summary = "mcp_voice_summary:main"
+
+[tool.setuptools]
+py-modules = ["mcp_voice_summary"]

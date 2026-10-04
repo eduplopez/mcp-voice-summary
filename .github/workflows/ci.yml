@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pyttsx3
+
+      - name: Pre-release checks
+        # Runs the test suite, pip-audit, stdout purity, a dangerous-call scan,
+        # the tool catalog budget and the counter privacy check. Exits non-zero
+        # on failure, so this gates the merge.
+        run: python pre_release_check.py
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
+          python -m twine check dist/*
+
+      - name: Verify the console script answers over stdio
+        run: python -c "import mcp_voice_summary as m; print(m.main.__doc__ is not None)"

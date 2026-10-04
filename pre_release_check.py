@@ -1,4 +1,4 @@
-"""Pre-release checks for the MCP voice summary server.
+﻿"""Pre-release checks for the MCP voice summary server.
 
 Bundles the checks worth running before every release, so they are not left to
 memory:
@@ -38,7 +38,7 @@ def main() -> int:
 
     print("\n3. stdout is clean (MCP JSON-RPC lives there)")
     proc = subprocess.run(
-        [sys.executable, "-c", "import server; server.list_voices()"],
+        [sys.executable, "-c", "import mcp_voice_summary as m; m.list_voices()"],
         capture_output=True,
         text=True,
     )
@@ -50,7 +50,7 @@ def main() -> int:
     check("no stray stdout", proc.returncode == 0, f"{len(noisy)} unexpected lines")
 
     print("\n4. No dangerous calls in the source")
-    with open("server.py", encoding="utf-8") as handle:
+    with open("mcp_voice_summary.py", encoding="utf-8") as handle:
         source = handle.read()
     for pattern, label in (
         ("shell=True", "shell=True"),
@@ -63,7 +63,7 @@ def main() -> int:
 
     print("\n5. Tool catalog size")
     sys.path.insert(0, ".")
-    import server  # noqa: E402
+    import mcp_voice_summary as server  # noqa: E402
 
     tools = asyncio.run(server.mcp.list_tools())
     budget = sum(

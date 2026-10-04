@@ -40,7 +40,7 @@ import time
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-mcp = MCPServer("VoiceSummaryServer")
+mcp = MCPServer("VoiceSummaryServer", version="0.1.0")
 
 logger = logging.getLogger("voice-summary")
 
@@ -1029,5 +1029,10 @@ def set_language(language: str = "", gender: str = "") -> str:
     return f"{state}. Voice: {voice}."
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console script entry point: runs the server over stdio."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

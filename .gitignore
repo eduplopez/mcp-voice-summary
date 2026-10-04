@@ -17,3 +17,6 @@ Thumbs.db
 # Audio generado en tiempo de ejecucion
 *.mp3
 *.wav
+# Build artefacts
+dist/
+build/

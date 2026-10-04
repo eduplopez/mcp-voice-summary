@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("VOICE_ENGINE", "edge")
 
-import server  # noqa: E402
+import mcp_voice_summary as server  # noqa: E402
 
 
 class TestInputHandling(unittest.TestCase):
@@ -357,7 +357,7 @@ class TestStdoutPurity(unittest.TestCase):
                 "import os, sys\n"
                 f"sys.path.insert(0, {root!r})\n"
                 "os.environ['VOICE_ENGINE'] = 'sapi5'\n"
-                "import server\n"
+                'import mcp_voice_summary as server\n'
             )
 
         proc = subprocess.run(
@@ -430,4 +430,5 @@ class TestTokenBudget(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
 
