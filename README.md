@@ -1,8 +1,10 @@
 ﻿# MCP Voice Summary Server
 
 [![CI](https://github.com/eduplopez/mcp-voice-summary/actions/workflows/ci.yml/badge.svg)](https://github.com/eduplopez/mcp-voice-summary/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/mcp-voice-summary.svg)](https://pypi.org/project/mcp-voice-summary/)
+[![Python](https://img.shields.io/pypi/pyversions/mcp-voice-summary.svg)](https://pypi.org/project/mcp-voice-summary/)
+[![Downloads](https://img.shields.io/pypi/dm/mcp-voice-summary.svg)](https://pypi.org/project/mcp-voice-summary/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 
 A local [MCP](https://modelcontextprotocol.io/) server that reads out loud a
 summary of the actions an AI assistant just performed on your code. Built as an
