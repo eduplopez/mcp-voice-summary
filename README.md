@@ -14,6 +14,8 @@ full response.
 Speaks in the user's language automatically, with female and male voices, and
 works fully offline if you want it to.
 
+<!-- mcp-name: io.github.eduplopez/mcp-voice-summary -->
+
 ## Quick start
 
 ```sh

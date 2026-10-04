@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-voice-summary"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server that reads task summaries out loud, offline or with neural voices"
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -40,7 +40,7 @@ import time
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-mcp = MCPServer("VoiceSummaryServer", version="0.1.0")
+mcp = MCPServer("VoiceSummaryServer", version="0.1.1")
 
 logger = logging.getLogger("voice-summary")
 

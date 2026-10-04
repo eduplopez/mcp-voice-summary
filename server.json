@@ -6,14 +6,14 @@
     "url": "https://github.com/eduplopez/mcp-voice-summary",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "websiteUrl": "https://github.com/eduplopez/mcp-voice-summary",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "mcp-voice-summary",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "transport": {
         "type": "stdio"
       },
