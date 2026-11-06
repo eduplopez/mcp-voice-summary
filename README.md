@@ -5,6 +5,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/mcp-voice-summary.svg)](https://pypi.org/project/mcp-voice-summary/)
 [![Downloads](https://img.shields.io/pypi/dm/mcp-voice-summary.svg)](https://pypi.org/project/mcp-voice-summary/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Voice Summary on mcprush](https://mcprush.com/badge/voice-summary-mcp/score.svg)](https://mcprush.com/to/voice-summary-mcp?ref=badge)
 
 A local [MCP](https://modelcontextprotocol.io/) server that reads out loud a
 summary of the actions an AI assistant just performed on your code. Built as an
@@ -60,6 +61,11 @@ With `uvx`, without installing anything:
 This server is also listed in the [MCP Registry](https://registry.modelcontextprotocol.io)
 under `io.github.eduplopez/mcp-voice-summary`. The registry metadata lives in
 [`server.json`](server.json) in this repo.
+
+It is also listed on [mcprush](https://mcprush.com/eduplopez/voice-summary-mcp),
+with install commands for several clients and its live security grade:
+
+[![Voice Summary MCP server](https://mcprush.com/badge/voice-summary-mcp/card.svg)](https://mcprush.com/to/voice-summary-mcp?ref=badge)
 
 Then tell your assistant to use it, for example: *"After you finish a task, read
 a short summary out loud."*
